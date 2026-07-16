@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect, useRef, useState, useCallback, useMemo,
+} from 'react';
 import * as THREE from 'three';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -8,10 +10,12 @@ import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtil
 // Three.js r128 puro (sin OrbitControls, sin React Three Fiber).
 // Assets originales del proyecto (en /public):
 //   /Cine/butacavip/butacavip.dae (+ difuse/normal)  → butaca VIP
-//   /images/texturagris.jpg, escaleras.jpg           → sala y graderío
+//   /images/texturagris.jpg                           → sala
 //   /images/speaker_diff.JPG                          → altavoces K.C.S.
 //   /images/maxima.JPG, minima.jpg                    → discos "IMMERSIÓ"
-//   /images/pantalla2.jpg                             → logo del cine
+//   /images/proyector.JPG                             → cabina de proyección
+//   /images/puerta3.jpg, senyalemer.jpg               → salidas de emergencia
+//   /images/pantalla2.jpg                             → logo (pre-show)
 //   /video/sintel_trailer-720p.mp4                    → trailer (CC-BY)
 // ============================================================================
 
@@ -29,6 +33,7 @@ const ROW_DEPTH_STD = 1.05;
 const ROW_DEPTH_VIP = 1.55;
 const AISLE_W = 1.1;
 const FLY_MS = 1100;
+const STORAGE_KEY = 'ticketing3d.sala';
 
 const easeInOutCubic = (t) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -56,27 +61,250 @@ const DEFAULT_PARAMS = {
   screenWPct: 100, // % del ancho de sala que ocupa la pantalla
   screenH: 8.0, // alto de pantalla en metros
 };
+const DEFAULT_PRICES = { std: 8.5, vip: 13.5 };
+
+// configuración inicial: hash de la URL (#c=...) > localStorage > defaults
+const loadInitial = () => {
+  try {
+    const m = window.location.hash.match(/c=([^&]+)/);
+    if (m) {
+      return JSON.parse(
+        decodeURIComponent(escape(atob(decodeURIComponent(m[1]))))
+      );
+    }
+  } catch (err) { /* hash corrupto: se ignora */ }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (err) { /* storage no disponible */ }
+  return {};
+};
+
+// iconos outline (trazo, sin relleno — estilo Feather)
+const Ic = ({ children, size = 15, style }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ verticalAlign: '-2px', ...style }}
+  >
+    {children}
+  </svg>
+);
+const icons = {
+  menu: (
+    <>
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </>
+  ),
+  x: (
+    <>
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </>
+  ),
+  volOff: (
+    <>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <line x1="23" y1="9" x2="17" y2="15" />
+      <line x1="17" y1="9" x2="23" y2="15" />
+    </>
+  ),
+  volOn: (
+    <>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </>
+  ),
+  home: (
+    <>
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </>
+  ),
+  back: (
+    <>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </>
+  ),
+  undo: (
+    <>
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </>
+  ),
+  redo: (
+    <>
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" />
+    </>
+  ),
+  play: <polygon points="5 3 19 12 5 21 5 3" />,
+  camera: (
+    <>
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </>
+  ),
+  share: (
+    <>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+    </>
+  ),
+  trash: (
+    <>
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </>
+  ),
+  ticket: (
+    <>
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
+    </>
+  ),
+};
 
 export default function CinemaConfigurator() {
   const mountRef = useRef(null);
   const tipRef = useRef(null);
   const fileRef = useRef(null);
+  const minimapRef = useRef(null);
   const T = useRef(null); // todo el estado three.js
-  const seatStates = useRef(new Map()); // "fila-asiento" -> 'vip' | 'blocked'
+  const initialRef = useRef(null);
+  if (initialRef.current === null) initialRef.current = loadInitial();
+  const seatStates = useRef(
+    new Map(initialRef.current.states || [])
+  ); // "fila-asiento" -> 'vip' | 'blocked'
   const modeRef = useRef('vip');
   const heatRef = useRef(false);
+  const histRef = useRef({ stack: [], idx: -1 });
+  const saveTimer = useRef(0);
 
-  const [params, setParams] = useState(DEFAULT_PARAMS);
+  const [params, setParams] = useState(() => ({
+    ...DEFAULT_PARAMS,
+    ...(initialRef.current.params || {}),
+  }));
+  const [prices, setPrices] = useState(() => ({
+    ...DEFAULT_PRICES,
+    ...(initialRef.current.prices || {}),
+  }));
   const [mode, setMode] = useState('vip'); // 'vip' | 'block' | 'clear' | 'pov'
   const [panelOpen, setPanelOpen] = useState(true);
   const [povUI, setPovUI] = useState(false);
   const [heatOn, setHeatOn] = useState(false);
   const [muted, setMuted] = useState(true);
-  const [counts, setCounts] = useState({ total: 0, vip: 0, blocked: 0, sold: 0 });
+  const [counts, setCounts] = useState({
+    total: 0, vip: 0, blocked: 0, sold: 0, soldVip: 0,
+  });
   const [vipDaeReady, setVipDaeReady] = useState(false);
   const [regenTick, setRegenTick] = useState(0);
+  const [buyN, setBuyN] = useState(2);
+  const [proposal, setProposal] = useState(null); // {keys, total, label}
+  const [shareMsg, setShareMsg] = useState('');
+  const [isNarrow, setIsNarrow] = useState(false);
 
   modeRef.current = mode;
+
+  // --------------------------------------------------------------------------
+  // Serialización (export / compartir / autosave)
+  // --------------------------------------------------------------------------
+  const serialize = useCallback(
+    () => ({
+      app: 'ticketing3d',
+      v: 3,
+      params,
+      prices,
+      states: [...seatStates.current.entries()],
+      sold: T.current ? [...T.current.soldSet] : [],
+    }),
+    [params, prices]
+  );
+
+  // --------------------------------------------------------------------------
+  // Historial (deshacer / rehacer): estados de butaca + ventas manuales
+  // --------------------------------------------------------------------------
+  const snapshotHist = () => ({
+    states: [...seatStates.current.entries()],
+    sold: T.current ? [...T.current.soldSet] : [],
+  });
+
+  const pushHistory = useCallback(() => {
+    const h = histRef.current;
+    h.stack = h.stack.slice(0, h.idx + 1);
+    h.stack.push(snapshotHist());
+    if (h.stack.length > 60) h.stack.shift();
+    h.idx = h.stack.length - 1;
+  }, []);
+
+  const restoreHist = useCallback((snap) => {
+    const t = T.current;
+    if (!t) return;
+    seatStates.current = new Map(snap.states);
+    t.soldSet = new Set(snap.sold);
+    t.proposal = new Set();
+    setProposal(null);
+    if (t.seatsGroup) for (const s of t.seatsGroup.children) applySeatState(s);
+    recount();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const undo = useCallback(() => {
+    const h = histRef.current;
+    if (h.idx < 0) return;
+    // al deshacer por primera vez, guarda el presente para poder rehacer
+    if (h.idx === h.stack.length - 1) {
+      h.stack.push(snapshotHist());
+    }
+    restoreHist(h.stack[h.idx]);
+    h.idx--;
+  }, [restoreHist]);
+
+  const redo = useCallback(() => {
+    const h = histRef.current;
+    if (h.idx >= h.stack.length - 2) return;
+    h.idx++;
+    restoreHist(h.stack[h.idx + 1]);
+  }, [restoreHist]);
 
   // --------------------------------------------------------------------------
   // Montaje: escena, cámara, luces, pantalla + vídeo, audio, input, render
@@ -141,9 +369,15 @@ export default function CinemaConfigurator() {
     };
     const texGrisFloor = loadTex('/images/texturagris.jpg');
     const texGrisWall = loadTex('/images/texturagris.jpg');
-    const texStairs = loadTex('/images/escaleras.jpg');
-    const texLogo = loadTex('/images/pantalla2.jpg');
     const texLogoScreen = loadTex('/images/pantalla2.jpg');
+    // ventana de la cabina de proyección (recorte del atlas proyector.JPG:
+    // la versión nítida ocupa la esquina superior izquierda)
+    const texProyector = loadTex('/images/proyector.JPG');
+    texProyector.repeat.set(0.558, 0.352);
+    texProyector.offset.set(0.008, 0.365);
+    // puerta de emergencia y señal verde (assets originales)
+    const texPuerta = loadTex('/images/puerta3.jpg');
+    const texSenyal = loadTex('/images/senyalemer.jpg');
     // discos "MÀXIMA/MÍNIMA IMMERSIÓ": recorte al círculo dentro del atlas
     const cropDisc = (url) => {
       const tx = loadTex(url);
@@ -157,6 +391,20 @@ export default function CinemaConfigurator() {
     const texSpeaker = loadTex('/images/speaker_diff.JPG');
     texSpeaker.repeat.set(0.829, 0.568);
     texSpeaker.offset.set(0.021, 0.001);
+    // halo turquesa en anillo para los discos de pared (glow barato sin bloom:
+    // gradiente radial con el centro transparente para no lavar el rótulo)
+    const glowCv = document.createElement('canvas');
+    glowCv.width = glowCv.height = 128;
+    const gctx = glowCv.getContext('2d');
+    const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0.0, 'rgba(45,212,191,0)');
+    grad.addColorStop(0.48, 'rgba(45,212,191,0)');
+    grad.addColorStop(0.6, 'rgba(72,229,214,0.5)');
+    grad.addColorStop(0.78, 'rgba(45,212,191,0.14)');
+    grad.addColorStop(1.0, 'rgba(45,212,191,0)');
+    gctx.fillStyle = grad;
+    gctx.fillRect(0, 0, 128, 128);
+    const texGlow = new THREE.CanvasTexture(glowCv);
 
     // ---- materiales compartidos ---------------------------------------------
     const mats = {
@@ -164,6 +412,12 @@ export default function CinemaConfigurator() {
       vipMark: new THREE.MeshStandardMaterial({ color: 0xd8232a, roughness: 0.75 }),
       blocked: new THREE.MeshStandardMaterial({ color: 0x35323a, roughness: 0.95 }),
       sold: new THREE.MeshStandardMaterial({ color: 0x221d26, roughness: 0.95 }),
+      proposal: new THREE.MeshStandardMaterial({
+        color: 0x1f9d55,
+        emissive: 0x34d399,
+        emissiveIntensity: 0.45,
+        roughness: 0.8,
+      }),
       metal: new THREE.MeshStandardMaterial({ color: 0x8a8d94, metalness: 0.85, roughness: 0.35 }),
       shell: new THREE.MeshStandardMaterial({ color: 0x17161a, roughness: 0.6 }),
       tray: new THREE.MeshStandardMaterial({ color: 0x111013, roughness: 0.5 }),
@@ -171,7 +425,7 @@ export default function CinemaConfigurator() {
       wall: new THREE.MeshStandardMaterial({ map: texGrisWall, color: 0x77747e, roughness: 0.95 }),
       ceiling: new THREE.MeshStandardMaterial({ color: 0x0d0c10, roughness: 1 }),
       platform: new THREE.MeshStandardMaterial({ color: 0x232028, roughness: 0.9 }),
-      stair: new THREE.MeshStandardMaterial({ map: texStairs, color: 0xbbbbbb, roughness: 0.9 }),
+      stair: new THREE.MeshStandardMaterial({ color: 0x2b2830, roughness: 0.9 }),
       led: new THREE.MeshStandardMaterial({
         color: 0x0a1a3a,
         emissive: 0x2b6bff,
@@ -183,11 +437,20 @@ export default function CinemaConfigurator() {
       discMin: new THREE.MeshBasicMaterial({ map: texMinima, toneMapped: false }),
       discPlain: new THREE.MeshStandardMaterial({ color: 0x060609, roughness: 0.4 }),
       ring: new THREE.MeshStandardMaterial({
-        color: 0x0a1a3a,
-        emissive: 0x3b82f6,
-        emissiveIntensity: 2.4,
+        color: 0x07211f,
+        emissive: 0x2dd4bf, // azul turquesa
+        emissiveIntensity: 0.85, // sin saturar a blanco con el tonemapping
       }),
-      logo: new THREE.MeshBasicMaterial({ map: texLogo, toneMapped: false }),
+      glow: new THREE.MeshBasicMaterial({
+        map: texGlow,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      proyector: new THREE.MeshBasicMaterial({ map: texProyector, toneMapped: false }),
+      door: new THREE.MeshStandardMaterial({ map: texPuerta, roughness: 0.85 }),
+      senyal: new THREE.MeshBasicMaterial({ map: texSenyal, toneMapped: false }),
+      curtain: new THREE.MeshStandardMaterial({ color: 0x0a090d, roughness: 1 }),
       slab: new THREE.MeshStandardMaterial({ color: 0x141218, roughness: 0.8 }),
       heat: [
         new THREE.MeshStandardMaterial({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.35, roughness: 0.85 }),
@@ -233,7 +496,7 @@ export default function CinemaConfigurator() {
     const screenGroup = new THREE.Group();
     scene.add(screenGroup);
 
-    // ---- audio posicional del trailer (arranca al pulsar 🔊) ------------------
+    // ---- audio posicional del trailer (arranca al pulsar Sonido) --------------
     const listener = new THREE.AudioListener();
     camera.add(listener);
     let posAudio = null;
@@ -433,8 +696,12 @@ export default function CinemaConfigurator() {
       vipModel: 'proc', // 'proc' | 'dae'
       vipBaseMats: {}, // nombre de mesh -> material original del dae
       seatsGroup: null, standGroup: null, roomGroup: null, signsGroup: null,
-      seatList: [], // [{key, autoVip}]
-      occupiedSet: new Set(),
+      seatList: [], // [{key, autoVip, row, col, px, pz, score}]
+      seatByKey: new Map(),
+      rowMeta: new Map(), // fila -> {n, isVip}
+      occupiedSet: new Set(), // ventas simuladas (slider)
+      soldSet: new Set(initialRef.current.sold || []), // ventas manuales
+      proposal: new Set(), // propuesta de compra activa
       disposables: [], // geometrías creadas por regeneración
       labelCache: {}, // texto -> material con CanvasTexture (números de fila)
       rowBands: [], // [{z0, z1, y}] para colisión de cámara con el graderío
@@ -445,6 +712,8 @@ export default function CinemaConfigurator() {
       homeView: { theta: 0, phi: 0.16, radius: 30, target: new THREE.Vector3(0, 0, 3) },
       pov: { active: false, eye: new THREE.Vector3(), yaw: 0, pitch: 0 },
       flight: null,
+      tourActive: false,
+      tourTimer: 0,
       lastLookTarget: new THREE.Vector3(0, 0, 3),
       raycaster: new THREE.Raycaster(),
       pointers: new Map(),
@@ -578,11 +847,13 @@ export default function CinemaConfigurator() {
         setPovUI(true);
       });
     };
+    T.current.enterPovAt = enterPovAt;
 
-    T.current.exitPov = () => {
+    // volver a la vista cenital que encuadra toda la sala (desde POV o desde
+    // cualquier posición orbital)
+    T.current.goHome = () => {
       const t = T.current;
-      if (t.flight || !t.pov.active) return;
-      // volver siempre a la vista cenital que encuadra toda la sala
+      if (t.flight) return;
       const home = t.homeView;
       t.orbit.theta = home.theta;
       t.orbit.phi = home.phi;
@@ -592,6 +863,51 @@ export default function CinemaConfigurator() {
       flyTo(orbitPos(t.orbit), t.orbit.target, () => {
         t.pov.active = false;
       });
+    };
+
+    // ---- recorrido cinemático por la sala --------------------------------------
+    T.current.startTour = () => {
+      const t = T.current;
+      if (t.flight || t.tourActive) return;
+      t.tourActive = true;
+      t.pov.active = false;
+      setPovUI(false);
+      setPanelOpen(false);
+      const hb = t.hallBounds;
+      const sc = t.screenCenter;
+      const midZ = (Z_START + hb.zBack) / 2;
+      const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+      const legs = [
+        // entrada por la puerta trasera
+        { p: [hb.halfW - 1.6, 1.8, hb.zBack - 1.6], t: [0, sc.y * 0.7, SCREEN_Z] },
+        // bajando por el pasillo central
+        { p: [0, 2.4, midZ + 2], t: [sc.x, sc.y, sc.z] },
+        // lateral mirando el graderío
+        { p: [-hb.halfW + 2.2, 3.4, SCREEN_Z + 7], t: [0, 1.6, midZ] },
+        // frente a la pantalla
+        { p: [0, sc.y, SCREEN_Z + 4.5], t: [sc.x, sc.y, sc.z] },
+      ];
+      let i = 0;
+      const next = () => {
+        const tt = T.current;
+        if (!tt || !tt.tourActive) return;
+        if (i >= legs.length) {
+          tt.tourActive = false;
+          tt.goHome();
+          return;
+        }
+        const L = legs[i++];
+        flyTo(v3(L.p), v3(L.t), () => {
+          tt.tourTimer = window.setTimeout(next, 900);
+        });
+      };
+      next();
+    };
+
+    // ---- captura PNG de la vista actual -----------------------------------------
+    T.current.snapshot = () => {
+      renderer.render(scene, camera);
+      return renderer.domElement.toDataURL('image/png');
     };
 
     // ---- picking ----------------------------------------------------------------
@@ -620,21 +936,20 @@ export default function CinemaConfigurator() {
       const key = seat.userData.key;
       if (m === 'vip') seatStates.current.set(key, 'vip');
       else if (m === 'block') seatStates.current.set(key, 'blocked');
-      else if (m === 'clear') seatStates.current.delete(key);
+      else if (m === 'clear') {
+        seatStates.current.delete(key);
+        T.current.soldSet.delete(key); // Normal también libera la venta manual
+      }
       applySeatState(seat);
       recount();
     };
+    T.current.applyModeTo = applyModeTo;
 
     const applyModeToRow = (row) => {
       const t = T.current;
-      const m = modeRef.current;
       for (const seat of t.seatsGroup.children) {
         if (seat.userData.row !== row) continue;
-        const key = seat.userData.key;
-        if (m === 'vip') seatStates.current.set(key, 'vip');
-        else if (m === 'block') seatStates.current.set(key, 'blocked');
-        else if (m === 'clear') seatStates.current.delete(key);
-        applySeatState(seat);
+        applyModeTo(seat);
       }
       recount();
     };
@@ -646,6 +961,14 @@ export default function CinemaConfigurator() {
     const onPointerDown = (e) => {
       const t = T.current;
       hideTip();
+      // cancelar el recorrido demo con cualquier gesto
+      if (t.tourActive) {
+        t.tourActive = false;
+        window.clearTimeout(t.tourTimer);
+        t.flight = null;
+        t.goHome();
+        return;
+      }
       // un ratón solo puede tener un puntero: purga posibles "fantasmas"
       // (pointerup perdidos) que bloquearían los clicks para siempre
       if (e.pointerType === 'mouse') t.pointers.clear();
@@ -666,6 +989,7 @@ export default function CinemaConfigurator() {
       ) {
         const res = pickAt(e.clientX, e.clientY);
         if (res && res.seat) {
+          pushHistory();
           t.painting = true;
           t.lastPaintKey = res.seat.userData.key;
           applyModeTo(res.seat);
@@ -686,7 +1010,8 @@ export default function CinemaConfigurator() {
           const st = seatStates.current.get(u.key);
           let extra = '';
           if (st === 'blocked') extra = ' · Bloqueada';
-          else if (t.occupiedSet.has(u.key)) extra = ' · Vendida';
+          else if (t.soldSet.has(u.key) || t.occupiedSet.has(u.key))
+            extra = ' · Vendida';
           else if (st === 'vip' || u.autoVip) extra = ' · VIP';
           showTip(e.clientX, e.clientY, `Fila ${u.row + 1} · Butaca ${u.col + 1}${extra}`);
         } else if (res && res.sign !== undefined) {
@@ -761,7 +1086,10 @@ export default function CinemaConfigurator() {
       const res = pickAt(e.clientX, e.clientY);
       if (!res) return;
       if (res.sign !== undefined) {
-        if (MARK_MODES.includes(modeRef.current)) applyModeToRow(res.sign);
+        if (MARK_MODES.includes(modeRef.current)) {
+          pushHistory();
+          applyModeToRow(res.sign);
+        }
         return;
       }
       const seat = res.seat;
@@ -869,6 +1197,7 @@ export default function CinemaConfigurator() {
     return () => {
       const t = T.current;
       cancelAnimationFrame(t.raf);
+      window.clearTimeout(t.tourTimer);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('pointerdown', gesturePlay);
       el.removeEventListener('pointerdown', onPointerDown);
@@ -891,7 +1220,7 @@ export default function CinemaConfigurator() {
 
   // --------------------------------------------------------------------------
   // Estado visual de una butaca (solo material, nunca la geometría)
-  // Prioridad: mapa de visión > bloqueada > vendida > VIP marcada > base
+  // Prioridad: mapa de visión > bloqueada > propuesta > vendida > VIP > base
   // --------------------------------------------------------------------------
   const applySeatState = useCallback((seatGroup) => {
     const t = T.current;
@@ -903,7 +1232,8 @@ export default function CinemaConfigurator() {
     let override = null;
     if (heatRef.current) override = t.mats.heat[seatGroup.userData.heat || 0];
     else if (state === 'blocked') override = t.mats.blocked;
-    else if (t.occupiedSet.has(key)) override = t.mats.sold;
+    else if (t.proposal.has(key)) override = t.mats.proposal;
+    else if (t.soldSet.has(key) || t.occupiedSet.has(key)) override = t.mats.sold;
     else if (state === 'vip' && !isDae) override = t.mats.vipMark;
     seatGroup.traverse((m) => {
       if (!m.isMesh || !m.name.startsWith('swap')) return;
@@ -917,18 +1247,108 @@ export default function CinemaConfigurator() {
     });
   }, []);
 
+  // --------------------------------------------------------------------------
+  // Minimapa 2D sincronizado
+  // --------------------------------------------------------------------------
+  const drawMinimap = useCallback(() => {
+    const t = T.current;
+    const cv = minimapRef.current;
+    if (!t || !cv || !t.seatList.length) return;
+    const seats = t.seatList;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const s of seats) {
+      if (s.px < minX) minX = s.px;
+      if (s.px > maxX) maxX = s.px;
+      if (s.pz < minZ) minZ = s.pz;
+      if (s.pz > maxZ) maxZ = s.pz;
+    }
+    const cssW = 178;
+    const pad = 10;
+    const scale = (cssW - pad * 2) / Math.max(1, maxX - minX);
+    const cssH = (maxZ - minZ) * scale + pad * 2 + 12;
+    const dpr = 2;
+    cv.width = cssW * dpr;
+    cv.height = cssH * dpr;
+    cv.style.width = `${cssW}px`;
+    cv.style.height = `${cssH}px`;
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, cssW, cssH);
+    // línea de pantalla arriba
+    ctx.strokeStyle = '#8fa3c8';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(pad, 6);
+    ctx.quadraticCurveTo(cssW / 2, 2, cssW - pad, 6);
+    ctx.stroke();
+    const dot = Math.max(2.6, scale * 0.55);
+    const off = 14;
+    for (const s of seats) {
+      const st = seatStates.current.get(s.key);
+      let c = '#8d8a96'; // libre estándar
+      if (heatRef.current) {
+        const seat = t.seatByKey.get(s.key);
+        const h = seat ? seat.userData.heat : 0;
+        c = h === 0 ? '#2f9e44' : h === 1 ? '#e8a013' : '#d9480f';
+      } else if (st === 'blocked') c = '#403c48';
+      else if (t.proposal.has(s.key)) c = '#34d399';
+      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = '#6b5a20';
+      else if (st === 'vip' || s.autoVip) c = '#d8232a';
+      ctx.fillStyle = c;
+      const x = pad + (s.px - minX) * scale;
+      const y = off + (s.pz - minZ) * scale;
+      ctx.fillRect(x - dot / 2, y - dot / 2, dot, dot);
+    }
+    t.miniMap = { minX, minZ, scale, pad, off };
+  }, []);
+
+  const onMinimapClick = useCallback(
+    (e) => {
+      const t = T.current;
+      const cv = minimapRef.current;
+      if (!t || !cv || !t.miniMap) return;
+      const rect = cv.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const { minX, minZ, scale, pad, off } = t.miniMap;
+      let best = null;
+      let bestD = 9e9;
+      for (const s of t.seatList) {
+        const x = pad + (s.px - minX) * scale;
+        const y = off + (s.pz - minZ) * scale;
+        const d = Math.hypot(x - cx, y - cy);
+        if (d < bestD) { bestD = d; best = s; }
+      }
+      if (!best || bestD > 9) return;
+      const seat = t.seatByKey.get(best.key);
+      if (!seat) return;
+      if (modeRef.current === 'pov' || t.pov.active) {
+        t.enterPovAt(seat);
+      } else {
+        pushHistory();
+        t.applyModeTo(seat);
+      }
+    },
+    [pushHistory]
+  );
+
   const recount = useCallback(() => {
     const t = T.current;
     if (!t) return;
-    let vip = 0, blocked = 0, sold = 0;
+    let vip = 0, blocked = 0, sold = 0, soldVip = 0;
     for (const s of t.seatList) {
       const st = seatStates.current.get(s.key);
+      const isVip = s.autoVip || st === 'vip';
       if (st === 'blocked') { blocked++; continue; }
-      if (t.occupiedSet.has(s.key)) sold++;
-      if (s.autoVip || st === 'vip') vip++;
+      if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) {
+        sold++;
+        if (isVip) soldVip++;
+      }
+      if (isVip) vip++;
     }
-    setCounts({ total: t.seatList.length, vip, blocked, sold });
-  }, []);
+    setCounts({ total: t.seatList.length, vip, blocked, sold, soldVip });
+    drawMinimap();
+  }, [drawMinimap]);
 
   // toggle del mapa de calidad de visión: solo cambia materiales
   useEffect(() => {
@@ -936,7 +1356,40 @@ export default function CinemaConfigurator() {
     const t = T.current;
     if (!t || !t.seatsGroup) return;
     for (const seat of t.seatsGroup.children) applySeatState(seat);
-  }, [heatOn, applySeatState]);
+    drawMinimap();
+  }, [heatOn, applySeatState, drawMinimap]);
+
+  // deshacer / rehacer con teclado
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
+
+  // media query móvil: el panel pasa a hoja inferior
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const on = () => setIsNarrow(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+
+  // autoguardado en localStorage (la config sobrevive al F5)
+  useEffect(() => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serialize()));
+      } catch (err) { /* storage lleno o bloqueado */ }
+    }, 400);
+    return () => window.clearTimeout(saveTimer.current);
+  }, [params, prices, counts, serialize]);
 
   // --------------------------------------------------------------------------
   // Regeneración procedural de la sala
@@ -958,6 +1411,8 @@ export default function CinemaConfigurator() {
     }
     t.disposables.forEach((d) => d.dispose());
     t.disposables = [];
+    t.proposal = new Set();
+    setProposal(null);
 
     const seatsGroup = new THREE.Group();
     const standGroup = new THREE.Group();
@@ -969,6 +1424,8 @@ export default function CinemaConfigurator() {
     t.signsGroup = signsGroup;
     scene.add(seatsGroup, standGroup, roomGroup, signsGroup);
     t.seatList = [];
+    t.seatByKey = new Map();
+    t.rowMeta = new Map();
     t.rowBands = [];
 
     const c = curvature / 100;
@@ -990,6 +1447,18 @@ export default function CinemaConfigurator() {
 
     // pantalla parametrizable (por defecto: todo el ancho, casi todo el alto)
     t.buildScreen(hallW, screenWPct, screenH);
+
+    // cortinas de enmascarado flanqueando la pantalla (como en salas reales)
+    for (const sx of [-1, 1]) {
+      const curtain = new THREE.Mesh(unitBox, mats.curtain);
+      curtain.scale.set(0.7, t.screenInfo.H + 1.0, 0.5);
+      curtain.position.set(
+        sx * (t.screenInfo.W / 2 + 0.4),
+        t.screenInfo.cy,
+        SCREEN_Z + 0.18
+      );
+      roomGroup.add(curtain);
+    }
 
     // ocupación simulada, estable por butaca
     t.occupiedSet = new Set();
@@ -1035,6 +1504,7 @@ export default function CinemaConfigurator() {
       z += depth;
       lastZBack = zRow + depth;
       t.rowBands.push({ z0: zRow - 0.6, z1: zRow + depth + 0.2, y });
+      t.rowMeta.set(r, { n, isVip: isVipRow });
 
       const Rr = R + (zRow - Z_START);
       const maxHalfArc = ((n - 1) * sp + (aisle ? AISLE_W : 0)) / 2;
@@ -1120,10 +1590,12 @@ export default function CinemaConfigurator() {
           col: i,
           autoVip: isVipRow,
           heat,
+          score,
           model: isVipRow ? (t.vipModel === 'dae' ? 'dae' : 'vipproc') : 'std',
         };
         seatsGroup.add(seat);
-        t.seatList.push({ key, autoVip: isVipRow });
+        t.seatList.push({ key, autoVip: isVipRow, row: r, col: i, px, pz, score });
+        t.seatByKey.set(key, seat);
         if (hash01(key) < occupancy / 100) t.occupiedSet.add(key);
         applySeatState(seat);
       }
@@ -1132,7 +1604,7 @@ export default function CinemaConfigurator() {
     seatsGroup.updateMatrixWorld(true);
     seatsGroup.traverse((o) => (o.matrixAutoUpdate = false));
 
-    // ---- sala (suelo, paredes, techo, discos, altavoces, logo) ----------------
+    // ---- sala (suelo, paredes, techo, discos, altavoces, cabina, puertas) -----
     const zBack = lastZBack + 2.6;
     const hallD = zBack - zFront;
     const zMid = (zFront + zBack) / 2;
@@ -1173,8 +1645,8 @@ export default function CinemaConfigurator() {
     const wallFront = mkWall(hallW, HALL_H);
     wallFront.position.set(0, HALL_H / 2, zFront);
 
-    // discos "IMMERSIÓ" (asset original): disco negro + aro LED azul emisivo,
-    // tamaños y alturas variadas como en la sala real
+    // discos "IMMERSIÓ" (asset original): disco negro + aro LED turquesa con
+    // halo, tamaños y alturas variadas como en la sala real
     const mkDisc = (radius, kind) => {
       const g = new THREE.Group();
       const discGeo = new THREE.CircleGeometry(radius, 40);
@@ -1188,6 +1660,11 @@ export default function CinemaConfigurator() {
       const ring = new THREE.Mesh(ringGeo, mats.ring);
       ring.position.z = -0.015;
       g.add(ring);
+      // halo suave alrededor del aro
+      const glow = new THREE.Mesh(unitPlane, mats.glow);
+      glow.scale.set(radius * 3.4, radius * 3.4, 1);
+      glow.position.z = 0.03;
+      g.add(glow);
       return g;
     };
     const nDiscs = Math.max(4, Math.floor(hallD / 4.2));
@@ -1229,16 +1706,27 @@ export default function CinemaConfigurator() {
       }
     }
 
-    // rótulo retroiluminado del cine en la pared trasera, con marco
-    const logoFrame = new THREE.Mesh(unitBox, mats.speakerBox);
-    logoFrame.scale.set(3.7, 3.7, 0.12);
-    logoFrame.position.set(0, 5.6, zBack - 0.06);
-    roomGroup.add(logoFrame);
-    const logo = new THREE.Mesh(unitPlane, mats.logo);
-    logo.scale.set(3.4, 3.4, 1);
-    logo.rotation.y = Math.PI;
-    logo.position.set(0, 5.6, zBack - 0.14);
-    roomGroup.add(logo);
+    // ventana de la cabina de proyección en la pared trasera, alineada con la
+    // luz de proyección (el proyector asoma tras el cristal)
+    const booth = new THREE.Mesh(unitPlane, mats.proyector);
+    booth.scale.set(2.5, 1.57, 1); // aspecto real del recorte (~1,59:1)
+    booth.rotation.y = Math.PI;
+    booth.position.set(0, 6.6, zBack - 0.05);
+    roomGroup.add(booth);
+
+    // puertas de emergencia con señal verde en las esquinas traseras
+    for (const sx of [-1, 1]) {
+      const door = new THREE.Mesh(unitPlane, mats.door);
+      door.scale.set(1.9, 2.3, 1);
+      door.rotation.y = Math.PI;
+      door.position.set(sx * (hallW / 2 - 2.3), 1.15, zBack - 0.04);
+      roomGroup.add(door);
+      const senyal = new THREE.Mesh(unitPlane, mats.senyal);
+      senyal.scale.set(0.72, 0.38, 1);
+      senyal.rotation.y = Math.PI;
+      senyal.position.set(sx * (hallW / 2 - 2.3), 2.6, zBack - 0.05);
+      roomGroup.add(senyal);
+    }
 
     // el foco cenital sigue el centro del graderío al crecer la sala
     const midZ = (Z_START + lastZBack) / 2;
@@ -1255,6 +1743,98 @@ export default function CinemaConfigurator() {
   }, [params, vipDaeReady, regenTick, applySeatState, recount]);
 
   // --------------------------------------------------------------------------
+  // Compra de entradas: sugerir los mejores N asientos contiguos
+  // --------------------------------------------------------------------------
+  const priceOf = useCallback(
+    (s) =>
+      s.autoVip || seatStates.current.get(s.key) === 'vip'
+        ? prices.vip
+        : prices.std,
+    [prices]
+  );
+
+  const clearProposal = useCallback(() => {
+    const t = T.current;
+    if (!t) return;
+    const old = [...t.proposal];
+    t.proposal = new Set();
+    for (const k of old) {
+      const seat = t.seatByKey.get(k);
+      if (seat) applySeatState(seat);
+    }
+    setProposal(null);
+    drawMinimap();
+  }, [applySeatState, drawMinimap]);
+
+  const proposeSeats = useCallback(() => {
+    const t = T.current;
+    if (!t) return;
+    clearProposal();
+    const N = Math.max(1, Math.min(8, buyN));
+    const sellable = (s) => {
+      const st = seatStates.current.get(s.key);
+      return (
+        st !== 'blocked' && !t.soldSet.has(s.key) && !t.occupiedSet.has(s.key)
+      );
+    };
+    // por fila: ventanas de N asientos consecutivos sin cruzar el pasillo
+    const byRow = new Map();
+    for (const s of t.seatList) {
+      if (!byRow.has(s.row)) byRow.set(s.row, []);
+      byRow.get(s.row)[s.col] = s;
+    }
+    let best = null;
+    for (const [row, arr] of byRow) {
+      const meta = t.rowMeta.get(row);
+      const n = meta ? meta.n : arr.length;
+      for (let c0 = 0; c0 + N <= n; c0++) {
+        // no atravesar el pasillo central
+        if (params.aisle && c0 < n / 2 && c0 + N > n / 2) continue;
+        let ok = true;
+        let sum = 0;
+        for (let k = 0; k < N; k++) {
+          const s = arr[c0 + k];
+          if (!s || !sellable(s)) { ok = false; break; }
+          sum += s.score;
+        }
+        if (!ok) continue;
+        if (!best || sum < best.sum) best = { row, c0, sum, seats: arr.slice(c0, c0 + N) };
+      }
+    }
+    if (!best) {
+      setProposal({ keys: [], total: 0, label: 'No hay sitio contiguo para ese grupo' });
+      return;
+    }
+    const keys = best.seats.map((s) => s.key);
+    t.proposal = new Set(keys);
+    for (const k of keys) {
+      const seat = t.seatByKey.get(k);
+      if (seat) applySeatState(seat);
+    }
+    const total = best.seats.reduce((acc, s) => acc + priceOf(s), 0);
+    setProposal({
+      keys,
+      total,
+      label: `Fila ${best.row + 1} · butacas ${best.c0 + 1}–${best.c0 + keys.length}`,
+    });
+    drawMinimap();
+  }, [buyN, params.aisle, priceOf, applySeatState, clearProposal, drawMinimap]);
+
+  const confirmProposal = useCallback(() => {
+    const t = T.current;
+    if (!t || !proposal || !proposal.keys.length) return;
+    pushHistory();
+    for (const k of proposal.keys) t.soldSet.add(k);
+    t.proposal = new Set();
+    for (const k of proposal.keys) {
+      const seat = t.seatByKey.get(k);
+      if (seat) applySeatState(seat);
+    }
+    setProposal(null);
+    recount();
+  }, [proposal, pushHistory, applySeatState, recount]);
+
+  // --------------------------------------------------------------------------
   // Acciones de UI
   // --------------------------------------------------------------------------
   const toggleSound = () => {
@@ -1269,13 +1849,7 @@ export default function CinemaConfigurator() {
   };
 
   const exportConfig = () => {
-    const data = {
-      app: 'ticketing3d',
-      v: 2,
-      params,
-      states: [...seatStates.current.entries()],
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
+    const blob = new Blob([JSON.stringify(serialize(), null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
@@ -1297,13 +1871,55 @@ export default function CinemaConfigurator() {
         if (!data || data.app !== 'ticketing3d' || !data.params) {
           throw new Error('formato');
         }
+        pushHistory();
         seatStates.current = new Map(data.states || []);
+        if (T.current) T.current.soldSet = new Set(data.sold || []);
+        if (data.prices) setPrices({ ...DEFAULT_PRICES, ...data.prices });
         setParams({ ...DEFAULT_PARAMS, ...data.params });
         setRegenTick((k) => k + 1);
       })
       .catch(() => {
         window.alert('El archivo no es una configuración de sala válida.');
       });
+  };
+
+  const shareLink = () => {
+    try {
+      const json = JSON.stringify(serialize());
+      const b64 = encodeURIComponent(btoa(unescape(encodeURIComponent(json))));
+      const url = `${window.location.origin}${window.location.pathname}#c=${b64}`;
+      window.history.replaceState(null, '', `#c=${b64}`);
+      const done = () => {
+        setShareMsg('¡Enlace copiado!');
+        setTimeout(() => setShareMsg(''), 2500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, done);
+      } else done();
+    } catch (err) {
+      window.alert('No se pudo generar el enlace.');
+    }
+  };
+
+  const resetAll = () => {
+    if (!window.confirm('¿Restablecer la sala a los valores por defecto?')) return;
+    pushHistory();
+    seatStates.current = new Map();
+    if (T.current) T.current.soldSet = new Set();
+    try { window.localStorage.removeItem(STORAGE_KEY); } catch (err) { /* noop */ }
+    window.history.replaceState(null, '', window.location.pathname);
+    setPrices(DEFAULT_PRICES);
+    setParams({ ...DEFAULT_PARAMS });
+    setRegenTick((k) => k + 1);
+  };
+
+  const takeSnapshot = () => {
+    const t = T.current;
+    if (!t || !t.snapshot) return;
+    const a = document.createElement('a');
+    a.href = t.snapshot();
+    a.download = 'sala-captura.png';
+    a.click();
   };
 
   const setP = (k) => (e) =>
@@ -1349,9 +1965,32 @@ export default function CinemaConfigurator() {
   );
 
   const libres = counts.total - counts.blocked - counts.sold;
+  const revenue =
+    counts.soldVip * prices.vip + (counts.sold - counts.soldVip) * prices.std;
+  const potential = useMemo(() => {
+    const t = T.current;
+    if (!t) return 0;
+    let sum = 0;
+    for (const s of t.seatList) {
+      if (seatStates.current.get(s.key) === 'blocked') continue;
+      sum += priceOf(s);
+    }
+    return sum;
+  }, [counts, priceOf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const panelStyle = isNarrow
+    ? {
+        ...ui.panel,
+        ...ui.panelNarrow,
+        transform: panelOpen ? 'translateY(0)' : 'translateY(calc(100% + 30px))',
+      }
+    : {
+        ...ui.panel,
+        transform: panelOpen ? 'translateX(0)' : 'translateX(calc(100% + 30px))',
+      };
 
   return (
-    <div style={{ position: 'fixed', inset: 0 }}>
+    <div style={{ position: 'fixed', inset: 0, userSelect: 'none' }}>
       <div ref={mountRef} style={{ position: 'absolute', inset: 0 }} />
 
       {/* tooltip de butaca */}
@@ -1360,27 +1999,63 @@ export default function CinemaConfigurator() {
       {/* aviso superior en modo POV */}
       {povUI && (
         <div style={ui.povHint}>
-          👁 Vista desde la butaca — arrastra para mirar · toca otra butaca para
+          Vista desde la butaca — arrastra para mirar · toca otra butaca para
           saltar a ella
         </div>
       )}
 
       {/* volver de POV */}
       {povUI && (
-        <button style={ui.backBtn} onClick={() => T.current && T.current.exitPov()}>
-          ← Volver a la vista general
+        <button style={ui.backBtn} onClick={() => T.current && T.current.goHome()}>
+          <Ic style={{ marginRight: 7 }}>{icons.back}</Ic>
+          Volver a la vista general
         </button>
       )}
 
-      {/* panel de configuración */}
-      {panelOpen ? (
-        <div style={ui.panel}>
+      {/* vista top / posición original (abajo izquierda) */}
+      {!povUI && (
+        <button
+          style={ui.homeBtn}
+          title="Vista general (top)"
+          onClick={() => T.current && T.current.goHome()}
+        >
+          <Ic size={19}>{icons.home}</Ic>
+        </button>
+      )}
+
+      {/* minimapa 2D (plano de butacas) */}
+      <canvas
+        ref={minimapRef}
+        onClick={onMinimapClick}
+        style={{
+          ...ui.minimap,
+          display: isNarrow && panelOpen ? 'none' : 'block',
+        }}
+      />
+
+      {/* hamburguesa (cuando el editor está cerrado) */}
+      {!povUI && (
+        <button
+          style={{
+            ...ui.burgerBtn,
+            opacity: panelOpen ? 0 : 1,
+            pointerEvents: panelOpen ? 'none' : 'auto',
+          }}
+          onClick={() => setPanelOpen(true)}
+        >
+          <Ic size={20}>{icons.menu}</Ic>
+        </button>
+      )}
+
+      {/* panel de configuración: drawer lateral animado */}
+      <div style={panelStyle}>
+        <div>
           <div style={ui.panelHead}>
             <strong style={{ letterSpacing: '.5px' }}>
               CINEMES <span style={{ color: '#d8232a' }}>FULL HD</span> · Sala 3D
             </strong>
             <button style={ui.closeBtn} onClick={() => setPanelOpen(false)}>
-              ✕
+              <Ic size={17}>{icons.x}</Ic>
             </button>
           </div>
 
@@ -1403,6 +2078,90 @@ export default function CinemaConfigurator() {
               <div style={{ ...ui.counterNum, color: '#c9a145' }}>{counts.sold}</div>
               <div style={ui.counterLbl}>Vendidas</div>
             </div>
+          </div>
+
+          {/* recaudación */}
+          <div style={ui.revenue}>
+            <span>
+              Recaudación: <b style={{ color: '#7ce38b' }}>{revenue.toFixed(2)} €</b>
+            </span>
+            <span style={{ opacity: 0.6 }}>
+              aforo completo {potential.toFixed(0)} €
+            </span>
+          </div>
+          <div style={ui.priceRow}>
+            <label style={ui.priceLbl}>
+              Precio estándar
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={prices.std}
+                onChange={(e) =>
+                  setPrices((p) => ({ ...p, std: Number(e.target.value) || 0 }))
+                }
+                style={ui.priceInput}
+              />
+            </label>
+            <label style={ui.priceLbl}>
+              Precio VIP
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={prices.vip}
+                onChange={(e) =>
+                  setPrices((p) => ({ ...p, vip: Number(e.target.value) || 0 }))
+                }
+                style={ui.priceInput}
+              />
+            </label>
+          </div>
+
+          {/* compra de entradas */}
+          <div style={ui.buyBox}>
+            <div style={ui.buyHead}>
+              <Ic style={{ marginRight: 6 }}>{icons.ticket}</Ic>
+              Comprar entradas
+            </div>
+            <div style={ui.buyRow}>
+              <input
+                type="number"
+                min="1"
+                max="8"
+                value={buyN}
+                onChange={(e) =>
+                  setBuyN(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
+                }
+                style={ui.buyInput}
+              />
+              <button onClick={proposeSeats} style={ui.buyBtn}>
+                Sugerir mejores asientos
+              </button>
+            </div>
+            {proposal && (
+              <div style={ui.proposalBox}>
+                {proposal.keys.length ? (
+                  <>
+                    <div style={{ marginBottom: 6 }}>
+                      <b style={{ color: '#34d399' }}>{proposal.label}</b>
+                      {' · '}
+                      {proposal.total.toFixed(2)} €
+                    </div>
+                    <div style={{ display: 'flex', gap: 7 }}>
+                      <button onClick={confirmProposal} style={ui.confirmBtn}>
+                        Confirmar venta
+                      </button>
+                      <button onClick={clearProposal} style={ui.cancelBtn}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ opacity: 0.75 }}>{proposal.label}</div>
+                )}
+              </div>
+            )}
           </div>
 
           {slider('Filas', 'rows', 3, 24, 1)}
@@ -1442,7 +2201,8 @@ export default function CinemaConfigurator() {
               borderColor: mode === 'pov' ? '#1d4ed8' : 'rgba(255,255,255,.15)',
             }}
           >
-            👁 Ver desde la butaca
+            <Ic style={{ marginRight: 7 }}>{icons.eye}</Ic>
+            Ver desde la butaca
           </button>
 
           <div style={ui.toolRow}>
@@ -1455,21 +2215,48 @@ export default function CinemaConfigurator() {
                 color: heatOn ? '#fff' : '#c9c6cf',
               }}
             >
-              🎯 Mapa de visión
+              <Ic style={{ marginRight: 6 }}>{icons.target}</Ic>
+              Mapa de visión
             </button>
             <button onClick={toggleSound} style={ui.toolBtn}>
-              {muted ? '🔇 Sonido' : '🔊 Silenciar'}
+              <Ic style={{ marginRight: 6 }}>{muted ? icons.volOff : icons.volOn}</Ic>
+              {muted ? 'Sonido' : 'Silenciar'}
+            </button>
+          </div>
+          <div style={ui.toolRow}>
+            <button
+              onClick={() => T.current && T.current.startTour()}
+              style={ui.toolBtn}
+            >
+              <Ic style={{ marginRight: 6 }}>{icons.play}</Ic>
+              Recorrido
+            </button>
+            <button onClick={takeSnapshot} style={ui.toolBtn}>
+              <Ic style={{ marginRight: 6 }}>{icons.camera}</Ic>
+              Captura
+            </button>
+          </div>
+          <div style={ui.toolRow}>
+            <button onClick={undo} style={ui.toolBtn}>
+              <Ic style={{ marginRight: 6 }}>{icons.undo}</Ic>
+              Deshacer
+            </button>
+            <button onClick={redo} style={ui.toolBtn}>
+              <Ic style={{ marginRight: 6 }}>{icons.redo}</Ic>
+              Rehacer
             </button>
           </div>
           <div style={ui.toolRow}>
             <button onClick={exportConfig} style={ui.toolBtn}>
-              ⬇ Exportar
+              <Ic style={{ marginRight: 6 }}>{icons.download}</Ic>
+              Exportar
             </button>
             <button
               onClick={() => fileRef.current && fileRef.current.click()}
               style={ui.toolBtn}
             >
-              ⬆ Importar
+              <Ic style={{ marginRight: 6 }}>{icons.upload}</Ic>
+              Importar
             </button>
             <input
               ref={fileRef}
@@ -1479,44 +2266,61 @@ export default function CinemaConfigurator() {
               style={{ display: 'none' }}
             />
           </div>
+          <div style={ui.toolRow}>
+            <button onClick={shareLink} style={ui.toolBtn}>
+              <Ic style={{ marginRight: 6 }}>{icons.share}</Ic>
+              {shareMsg || 'Compartir'}
+            </button>
+            <button onClick={resetAll} style={ui.toolBtn}>
+              <Ic style={{ marginRight: 6 }}>{icons.trash}</Ic>
+              Reiniciar
+            </button>
+          </div>
 
           <div style={ui.help}>
             Arrastra para orbitar · rueda/pellizco para zoom · toca una butaca
-            para marcarla
+            para marcarla · Ctrl+Z deshace
           </div>
         </div>
-      ) : (
-        !povUI && (
-          <button style={ui.openBtn} onClick={() => setPanelOpen(true)}>
-            ⚙ Configurar sala
-          </button>
-        )
-      )}
+      </div>
     </div>
   );
 }
 
 // ----------------------------------------------------------------------------
-// estilos (panel flotante glassmorphism, acento rojo #d8232a)
+// estilos (drawer glassmorphism, acento rojo #d8232a en los controles)
 // ----------------------------------------------------------------------------
 const ui = {
   panel: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 'min(330px, calc(100vw - 24px))',
-    maxHeight: 'calc(100vh - 24px)',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: 'min(340px, calc(100vw - 20px))',
     overflowY: 'auto',
-    background: 'rgba(16,14,20,.74)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    border: '1px solid rgba(216,35,42,.35)',
-    borderRadius: 14,
-    padding: '14px 16px 12px',
+    background: 'rgba(16,14,20,.78)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    borderLeft: '1px solid rgba(255,255,255,.1)',
+    padding: '16px 16px 14px',
     color: '#e8e6ec',
     fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
     fontSize: 13,
-    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
+    boxShadow: '-12px 0 44px rgba(0,0,0,.5)',
+    transition: 'transform .38s cubic-bezier(.22, 1, .36, 1)',
+    willChange: 'transform',
+  },
+  panelNarrow: {
+    top: 'auto',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '58%',
+    borderLeft: 'none',
+    borderTop: '1px solid rgba(255,255,255,.1)',
+    borderRadius: '16px 16px 0 0',
+    boxShadow: '0 -12px 44px rgba(0,0,0,.5)',
   },
   panelHead: {
     display: 'flex',
@@ -1529,7 +2333,6 @@ const ui = {
     background: 'none',
     border: 'none',
     color: '#9a95a3',
-    fontSize: 15,
     cursor: 'pointer',
     padding: 4,
   },
@@ -1537,7 +2340,7 @@ const ui = {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr 1fr 1fr',
     gap: 6,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   counter: {
     border: '1px solid rgba(255,255,255,.14)',
@@ -1548,6 +2351,96 @@ const ui = {
   },
   counterNum: { fontSize: 17, fontWeight: 700, lineHeight: 1.1 },
   counterLbl: { fontSize: 10, opacity: 0.65, marginTop: 2 },
+  revenue: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    fontSize: 12.5,
+    marginBottom: 8,
+    padding: '7px 10px',
+    borderRadius: 9,
+    background: 'rgba(255,255,255,.04)',
+    border: '1px solid rgba(255,255,255,.1)',
+  },
+  priceRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 7,
+    marginBottom: 10,
+  },
+  priceLbl: {
+    fontSize: 11,
+    opacity: 0.85,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  priceInput: {
+    width: '100%',
+    padding: '6px 8px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.15)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#e8e6ec',
+    fontSize: 13,
+  },
+  buyBox: {
+    border: '1px solid rgba(52,211,153,.35)',
+    borderRadius: 10,
+    padding: '10px 10px 9px',
+    marginBottom: 12,
+    background: 'rgba(52,211,153,.05)',
+  },
+  buyHead: { fontSize: 12.5, fontWeight: 600, marginBottom: 8 },
+  buyRow: { display: 'flex', gap: 7 },
+  buyInput: {
+    width: 52,
+    padding: '7px 8px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.15)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#e8e6ec',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  buyBtn: {
+    flex: 1,
+    padding: '8px 4px',
+    borderRadius: 8,
+    border: '1px solid rgba(52,211,153,.5)',
+    background: 'rgba(52,211,153,.12)',
+    color: '#a7f3d0',
+    cursor: 'pointer',
+    fontSize: 12.5,
+    fontWeight: 600,
+  },
+  proposalBox: {
+    marginTop: 9,
+    fontSize: 12.5,
+    padding: '8px 9px',
+    borderRadius: 8,
+    background: 'rgba(255,255,255,.05)',
+  },
+  confirmBtn: {
+    flex: 1,
+    padding: '8px 4px',
+    borderRadius: 8,
+    border: '1px solid #1f9d55',
+    background: '#1f9d55',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: 12.5,
+    fontWeight: 600,
+  },
+  cancelBtn: {
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid rgba(255,255,255,.2)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#c9c6cf',
+    cursor: 'pointer',
+    fontSize: 12.5,
+  },
   row: { marginBottom: 9 },
   rowTop: {
     display: 'flex',
@@ -1572,7 +2465,7 @@ const ui = {
     marginBottom: 8,
   },
   modeBtn: {
-    padding: '8px 4px',
+    padding: '10px 4px',
     borderRadius: 9,
     border: '1px solid',
     cursor: 'pointer',
@@ -1582,7 +2475,7 @@ const ui = {
   },
   povBtn: {
     width: '100%',
-    padding: '9px 4px',
+    padding: '10px 4px',
     borderRadius: 9,
     border: '1px solid',
     color: '#fff',
@@ -1598,7 +2491,7 @@ const ui = {
     marginBottom: 8,
   },
   toolBtn: {
-    padding: '8px 4px',
+    padding: '10px 4px',
     borderRadius: 9,
     border: '1px solid rgba(255,255,255,.15)',
     background: 'rgba(255,255,255,.06)',
@@ -1614,20 +2507,54 @@ const ui = {
     borderTop: '1px solid rgba(255,255,255,.1)',
     paddingTop: 8,
   },
-  openBtn: {
+  burgerBtn: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    padding: '10px 16px',
+    top: 14,
+    right: 14,
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 12,
-    border: '1px solid rgba(216,35,42,.5)',
+    border: '1px solid rgba(255,255,255,.16)',
     background: 'rgba(16,14,20,.74)',
     backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
     color: '#e8e6ec',
-    fontSize: 13.5,
-    fontWeight: 600,
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.55)',
+    transition: 'opacity .25s',
+  },
+  homeBtn: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,.16)',
+    background: 'rgba(16,14,20,.74)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
+    color: '#e8e6ec',
+    cursor: 'pointer',
+    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
+  },
+  minimap: {
+    position: 'absolute',
+    bottom: 16,
+    left: 72,
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,.14)',
+    background: 'rgba(12,10,16,.78)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    cursor: 'pointer',
+    boxShadow: '0 10px 40px rgba(0,0,0,.5)',
   },
   povHint: {
     position: 'absolute',
@@ -1662,6 +2589,8 @@ const ui = {
     cursor: 'pointer',
     fontFamily: 'system-ui, sans-serif',
     boxShadow: '0 8px 30px rgba(0,0,0,.5)',
+    display: 'flex',
+    alignItems: 'center',
   },
   tip: {
     position: 'absolute',
