@@ -208,6 +208,7 @@ const icons = {
 export default function CinemaConfigurator() {
   const mountRef = useRef(null);
   const tipRef = useRef(null);
+  const markerLabelRef = useRef(null);
   const fileRef = useRef(null);
   const minimapRef = useRef(null);
   const T = useRef(null); // todo el estado three.js
@@ -241,6 +242,7 @@ export default function CinemaConfigurator() {
   const [regenTick, setRegenTick] = useState(0);
   const [buyN, setBuyN] = useState(2);
   const [proposal, setProposal] = useState(null); // {keys, total, label}
+  const [tourUI, setTourUI] = useState(false);
   const [shareMsg, setShareMsg] = useState('');
   const [isNarrow, setIsNarrow] = useState(false);
 
@@ -496,6 +498,31 @@ export default function CinemaConfigurator() {
     const screenGroup = new THREE.Group();
     scene.add(screenGroup);
 
+    // ---- baliza de butaca seleccionada (flecha + aro que saltan de butaca en
+    // butaca mostrando cada posición de la propuesta de compra) ----------------
+    const markerMat = new THREE.MeshStandardMaterial({
+      color: 0x1f9d55,
+      emissive: 0x34d399,
+      emissiveIntensity: 1.1,
+    });
+    const markerGrp = new THREE.Group();
+    const markerCone = new THREE.Mesh(
+      new THREE.ConeGeometry(0.16, 0.36, 16),
+      markerMat
+    );
+    markerCone.rotation.x = Math.PI; // apunta hacia abajo
+    markerGrp.add(markerCone);
+    const markerRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.34, 0.028, 8, 36),
+      markerMat
+    );
+    markerRing.rotation.x = Math.PI / 2;
+    markerRing.position.y = -0.5;
+    markerGrp.add(markerRing);
+    markerGrp.visible = false;
+    scene.add(markerGrp);
+    const markerPos = new THREE.Vector3();
+
     // ---- audio posicional del trailer (arranca al pulsar Sonido) --------------
     const listener = new THREE.AudioListener();
     camera.add(listener);
@@ -714,6 +741,10 @@ export default function CinemaConfigurator() {
       flight: null,
       tourActive: false,
       tourTimer: 0,
+      marker: markerGrp,
+      markerKeys: [],
+      markerIdx: 0,
+      markerNextAt: 0,
       lastLookTarget: new THREE.Vector3(0, 0, 3),
       raycaster: new THREE.Raycaster(),
       pointers: new Map(),
@@ -800,10 +831,11 @@ export default function CinemaConfigurator() {
       return 0;
     };
 
-    const flyTo = (toPos, toTgt, onDone) => {
+    const flyTo = (toPos, toTgt, onDone, dur = FLY_MS) => {
       const t = T.current;
       t.flight = {
         t0: performance.now(),
+        dur,
         fromPos: camera.position.clone(),
         toPos: toPos.clone(),
         fromTgt: t.lastLookTarget.clone(),
@@ -866,26 +898,38 @@ export default function CinemaConfigurator() {
     };
 
     // ---- recorrido cinemático por la sala --------------------------------------
+    // Un paseo continuo y legible: la cámara entra por lo alto del pasillo
+    // central, baja siguiendo la rampa del graderío mirando siempre a la
+    // pantalla, llega a primera fila, se gira frente al patio de butacas y
+    // vuelve a la vista general. Sin cortes ni saltos de objetivo.
     T.current.startTour = () => {
       const t = T.current;
       if (t.flight || t.tourActive) return;
       t.tourActive = true;
       t.pov.active = false;
       setPovUI(false);
+      setTourUI(true);
       setPanelOpen(false);
       const hb = t.hallBounds;
       const sc = t.screenCenter;
       const midZ = (Z_START + hb.zBack) / 2;
+      const topY = t.rowBands.length
+        ? t.rowBands[t.rowBands.length - 1].y
+        : 2.2;
       const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
       const legs = [
-        // entrada por la puerta trasera
-        { p: [hb.halfW - 1.6, 1.8, hb.zBack - 1.6], t: [0, sc.y * 0.7, SCREEN_Z] },
-        // bajando por el pasillo central
-        { p: [0, 2.4, midZ + 2], t: [sc.x, sc.y, sc.z] },
-        // lateral mirando el graderío
-        { p: [-hb.halfW + 2.2, 3.4, SCREEN_Z + 7], t: [0, 1.6, midZ] },
-        // frente a la pantalla
-        { p: [0, sc.y, SCREEN_Z + 4.5], t: [sc.x, sc.y, sc.z] },
+        // 1. alto del pasillo central, tras la última fila
+        { p: [0, topY + 2.3, hb.zBack - 1.2], t: [0, sc.y, SCREEN_Z], d: 2400 },
+        // 2. bajando la rampa por el pasillo, a media sala
+        { p: [0, topY / 2 + 1.9, midZ], t: [0, sc.y * 0.9, SCREEN_Z], d: 2600 },
+        // 3. llegada a primera fila, a pie de pantalla
+        { p: [0, 1.7, Z_START - 1.4], t: [0, sc.y, SCREEN_Z], d: 2600 },
+        // 4. giro lateral frente al graderío: se ve toda la sala de butacas
+        {
+          p: [-Math.min(hb.halfW - 1.4, 6.5), 2.8, SCREEN_Z + 6.5],
+          t: [0, 1.8, midZ],
+          d: 2800,
+        },
       ];
       let i = 0;
       const next = () => {
@@ -893,13 +937,12 @@ export default function CinemaConfigurator() {
         if (!tt || !tt.tourActive) return;
         if (i >= legs.length) {
           tt.tourActive = false;
+          setTourUI(false);
           tt.goHome();
           return;
         }
         const L = legs[i++];
-        flyTo(v3(L.p), v3(L.t), () => {
-          tt.tourTimer = window.setTimeout(next, 900);
-        });
+        flyTo(v3(L.p), v3(L.t), next, L.d);
       };
       next();
     };
@@ -964,7 +1007,7 @@ export default function CinemaConfigurator() {
       // cancelar el recorrido demo con cualquier gesto
       if (t.tourActive) {
         t.tourActive = false;
-        window.clearTimeout(t.tourTimer);
+        setTourUI(false);
         t.flight = null;
         t.goHome();
         return;
@@ -1158,7 +1201,7 @@ export default function CinemaConfigurator() {
       projLight.intensity = flicker * (0.55 + 1.5 * tintBrightness);
 
       if (t.flight) {
-        const k = Math.min(1, (now - t.flight.t0) / FLY_MS);
+        const k = Math.min(1, (now - t.flight.t0) / (t.flight.dur || FLY_MS));
         const e = easeInOutCubic(k);
         camera.position.lerpVectors(t.flight.fromPos, t.flight.toPos, e);
         t.lastLookTarget.lerpVectors(t.flight.fromTgt, t.flight.toTgt, e);
@@ -1186,6 +1229,47 @@ export default function CinemaConfigurator() {
         camera.position.copy(pos);
         t.lastLookTarget.copy(t.orbit.target);
         camera.lookAt(t.orbit.target);
+      }
+
+      // baliza de butacas seleccionadas: salta de una a otra cada 1,6 s,
+      // flota sobre la butaca activa y proyecta su etiqueta "Fila · Butaca"
+      const mk = t.markerKeys;
+      const lbl = markerLabelRef.current;
+      if (mk.length && t.seatByKey.size) {
+        if (now >= t.markerNextAt) {
+          t.markerIdx = (t.markerIdx + 1) % mk.length;
+          t.markerNextAt = now + 1600;
+        }
+        const seat = t.seatByKey.get(mk[t.markerIdx % mk.length]);
+        if (seat) {
+          seat.getWorldPosition(markerPos);
+          const bob = Math.sin(now * 0.005) * 0.07;
+          t.marker.position.set(
+            markerPos.x,
+            markerPos.y + 1.6 + bob,
+            markerPos.z
+          );
+          t.marker.rotation.y = now * 0.0012;
+          t.marker.visible = true;
+          if (lbl) {
+            markerPos.y += 2.1;
+            markerPos.project(camera);
+            if (markerPos.z < 1) {
+              const u = seat.userData;
+              lbl.textContent = `Fila ${u.row + 1} · Butaca ${u.col + 1}  (${
+                (t.markerIdx % mk.length) + 1
+              }/${mk.length})`;
+              lbl.style.display = 'block';
+              lbl.style.left = `${(markerPos.x * 0.5 + 0.5) * mount.clientWidth}px`;
+              lbl.style.top = `${(-markerPos.y * 0.5 + 0.5) * mount.clientHeight}px`;
+            } else {
+              lbl.style.display = 'none';
+            }
+          }
+        }
+      } else {
+        t.marker.visible = false;
+        if (lbl) lbl.style.display = 'none';
       }
 
       renderer.render(scene, camera);
@@ -1412,6 +1496,7 @@ export default function CinemaConfigurator() {
     t.disposables.forEach((d) => d.dispose());
     t.disposables = [];
     t.proposal = new Set();
+    t.markerKeys = [];
     setProposal(null);
 
     const seatsGroup = new THREE.Group();
@@ -1758,6 +1843,7 @@ export default function CinemaConfigurator() {
     if (!t) return;
     const old = [...t.proposal];
     t.proposal = new Set();
+    t.markerKeys = [];
     for (const k of old) {
       const seat = t.seatByKey.get(k);
       if (seat) applySeatState(seat);
@@ -1807,6 +1893,10 @@ export default function CinemaConfigurator() {
     }
     const keys = best.seats.map((s) => s.key);
     t.proposal = new Set(keys);
+    // baliza cíclica: irá mostrando la posición de cada butaca propuesta
+    t.markerKeys = keys;
+    t.markerIdx = -1;
+    t.markerNextAt = 0;
     for (const k of keys) {
       const seat = t.seatByKey.get(k);
       if (seat) applySeatState(seat);
@@ -1826,6 +1916,7 @@ export default function CinemaConfigurator() {
     pushHistory();
     for (const k of proposal.keys) t.soldSet.add(k);
     t.proposal = new Set();
+    t.markerKeys = [];
     for (const k of proposal.keys) {
       const seat = t.seatByKey.get(k);
       if (seat) applySeatState(seat);
@@ -1996,11 +2087,21 @@ export default function CinemaConfigurator() {
       {/* tooltip de butaca */}
       <div ref={tipRef} style={ui.tip} />
 
+      {/* etiqueta de la baliza de butacas seleccionadas */}
+      <div ref={markerLabelRef} style={ui.markerLabel} />
+
       {/* aviso superior en modo POV */}
       {povUI && (
         <div style={ui.povHint}>
           Vista desde la butaca — arrastra para mirar · toca otra butaca para
           saltar a ella
+        </div>
+      )}
+
+      {/* aviso durante el recorrido */}
+      {tourUI && (
+        <div style={ui.povHint}>
+          Recorrido por la sala — toca en cualquier sitio para salir
         </div>
       )}
 
@@ -2605,5 +2706,21 @@ const ui = {
     fontFamily: 'system-ui, sans-serif',
     whiteSpace: 'nowrap',
     zIndex: 10,
+  },
+  markerLabel: {
+    position: 'absolute',
+    display: 'none',
+    transform: 'translate(-50%, -115%)',
+    pointerEvents: 'none',
+    background: 'rgba(10,26,20,.92)',
+    border: '1px solid rgba(52,211,153,.6)',
+    borderRadius: 999,
+    padding: '6px 14px',
+    color: '#a7f3d0',
+    fontSize: 12.5,
+    fontWeight: 600,
+    fontFamily: 'system-ui, sans-serif',
+    whiteSpace: 'nowrap',
+    zIndex: 9,
   },
 };
