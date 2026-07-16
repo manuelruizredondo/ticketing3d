@@ -1,33 +1,29 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
+import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ============================================================================
 // Configurador 3D de sala de cine — Cinemes Full HD (Centre Splau)
 // Three.js r128 puro (sin OrbitControls, sin React Three Fiber).
-// Usa los assets originales del proyecto:
-//   /Cine/butacavip/butacavip.dae  (+ difuse/normal)  → butaca VIP
-//   /images/texturagris.jpg, escaleras.jpg, lucesazules3(.alfa).jpg,
-//   /images/pantalla2.jpg (logo)                       → sala
-// En la pantalla se proyecta un trailer (VideoTexture).
+// Assets originales del proyecto (en /public):
+//   /Cine/butacavip/butacavip.dae (+ difuse/normal)  → butaca VIP
+//   /images/texturagris.jpg, escaleras.jpg           → sala y graderío
+//   /images/speaker_diff.JPG                          → altavoces K.C.S.
+//   /images/maxima.JPG, minima.jpg                    → discos "IMMERSIÓ"
+//   /images/pantalla2.jpg                             → logo del cine
+//   /video/sintel_trailer-720p.mp4                    → trailer (CC-BY)
 // ============================================================================
 
-// Trailer de "Sintel" (Blender Foundation, CC-BY) descargado en public/video/
+// El trailer trae letterbox incrustado: imagen real 1280×544 (2,35:1) con
+// 88 px de barra negra arriba y abajo — se recorta vía UV.
+const VIDEO_CROP = { y: 88 / 720, h: 544 / 720 };
+const VIDEO_ASPECT = 1280 / 544;
 const TRAILER_URL = '/video/sintel_trailer-720p.mp4';
 
-// El trailer trae letterbox incrustado: imagen real 1280×544 (2,35:1) con
-// 88 px de barra negra arriba y abajo — se recorta vía UV y la pantalla se
-// dimensiona al aspecto real para que el vídeo la ocupe entera.
-const VIDEO_CROP = { y: 88 / 720, h: 544 / 720 };
-const SCREEN = {
-  R: 16, // radio del cilindro de pantalla
-  cz: 7, // centro del cilindro (la superficie queda en z ≈ -9)
-  cy: 3.95,
-  halfTheta: 0.3646, // cuerda de ~11,4 m
-  height: 4.85, // 11,4 / 2,35
-  thick: 0.3, // grosor del panel de pantalla
-};
-const SCREEN_CENTER = new THREE.Vector3(0, SCREEN.cy, SCREEN.cz - SCREEN.R);
+const HALL_H = 9.6; // altura de la sala
+const SCREEN_Z = -9; // z del punto más cercano de la pantalla
+const SCREEN_BOTTOM = 1.0; // metro libre entre pantalla y suelo
 const Z_START = 2.6; // z de la primera fila
 const ROW_DEPTH_STD = 1.05;
 const ROW_DEPTH_VIP = 1.55;
@@ -37,31 +33,53 @@ const FLY_MS = 1100;
 const easeInOutCubic = (t) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
+// hash determinista → [0,1). Con él la ocupación simulada es estable: subir
+// el slider añade butacas vendidas sin cambiar las que ya lo estaban.
+const hash01 = (str) => {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return (h >>> 8) / 16777216;
+};
+
+const DEFAULT_PARAMS = {
+  rows: 12,
+  cols: 16,
+  vipRows: 2,
+  curvature: 35, // 0-100 %
+  slope: 0.25, // m / fila
+  spacing: 0.78, // m
+  aisle: true,
+  occupancy: 0, // % de butacas vendidas (simulación)
+  screenWPct: 100, // % del ancho de sala que ocupa la pantalla
+  screenH: 8.0, // alto de pantalla en metros
+};
+
 export default function CinemaConfigurator() {
   const mountRef = useRef(null);
+  const tipRef = useRef(null);
+  const fileRef = useRef(null);
   const T = useRef(null); // todo el estado three.js
   const seatStates = useRef(new Map()); // "fila-asiento" -> 'vip' | 'blocked'
   const modeRef = useRef('vip');
+  const heatRef = useRef(false);
 
-  const [params, setParams] = useState({
-    rows: 12,
-    cols: 16,
-    vipRows: 2,
-    curvature: 35, // 0-100 %
-    slope: 0.25, // m / fila
-    spacing: 0.78, // m
-    aisle: true,
-  });
+  const [params, setParams] = useState(DEFAULT_PARAMS);
   const [mode, setMode] = useState('vip'); // 'vip' | 'block' | 'clear' | 'pov'
   const [panelOpen, setPanelOpen] = useState(true);
   const [povUI, setPovUI] = useState(false);
-  const [counts, setCounts] = useState({ total: 0, vip: 0, blocked: 0 });
+  const [heatOn, setHeatOn] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [counts, setCounts] = useState({ total: 0, vip: 0, blocked: 0, sold: 0 });
   const [vipDaeReady, setVipDaeReady] = useState(false);
+  const [regenTick, setRegenTick] = useState(0);
 
   modeRef.current = mode;
 
   // --------------------------------------------------------------------------
-  // Montaje: escena, cámara, luces, pantalla + vídeo, input, bucle de render
+  // Montaje: escena, cámara, luces, pantalla + vídeo, audio, input, render
   // --------------------------------------------------------------------------
   useEffect(() => {
     const mount = mountRef.current;
@@ -78,13 +96,13 @@ export default function CinemaConfigurator() {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0b0a0e);
-    scene.fog = new THREE.Fog(0x0b0a0e, 18, 78);
+    scene.fog = new THREE.Fog(0x0b0a0e, 18, 90);
 
     const camera = new THREE.PerspectiveCamera(
       55,
       mount.clientWidth / mount.clientHeight,
       0.1,
-      200
+      220
     );
 
     // ---- luces -------------------------------------------------------------
@@ -102,10 +120,16 @@ export default function CinemaConfigurator() {
     fill.position.set(-10, 7, 22);
     scene.add(fill);
 
-    // luz de "proyección" azulada que parpadea delante de la pantalla
-    const projLight = new THREE.PointLight(0x7aa7ff, 1.3, 34, 2);
-    projLight.position.set(0, 4.4, -5.5);
+    // luz de "proyección": parpadea y se tiñe con el color medio del fotograma
+    const projLight = new THREE.PointLight(0x7aa7ff, 1.3, 40, 2);
+    projLight.position.set(0, 5, SCREEN_Z + 3.5);
     scene.add(projLight);
+    const tintColor = new THREE.Color(0x7aa7ff);
+    const tintCanvas = document.createElement('canvas');
+    tintCanvas.width = 4;
+    tintCanvas.height = 4;
+    const tintCtx = tintCanvas.getContext('2d', { willReadFrequently: true });
+    let tintBrightness = 0.5;
 
     // ---- texturas ------------------------------------------------------------
     const texLoader = new THREE.TextureLoader();
@@ -119,13 +143,16 @@ export default function CinemaConfigurator() {
     const texGrisWall = loadTex('/images/texturagris.jpg');
     const texStairs = loadTex('/images/escaleras.jpg');
     const texLogo = loadTex('/images/pantalla2.jpg');
-    // aplique triangular original (luces.JPG): el atlas tiene las dos caras
-    // del prisma lado a lado → una textura recortada por cara
-    const texSconceL = loadTex('/images/luces.JPG');
-    texSconceL.repeat.set(0.5, 1);
-    const texSconceR = loadTex('/images/luces.JPG');
-    texSconceR.repeat.set(0.5, 1);
-    texSconceR.offset.x = 0.5;
+    const texLogoScreen = loadTex('/images/pantalla2.jpg');
+    // discos "MÀXIMA/MÍNIMA IMMERSIÓ": recorte al círculo dentro del atlas
+    const cropDisc = (url) => {
+      const tx = loadTex(url);
+      tx.repeat.set(0.69, 0.68);
+      tx.offset.set(0.055, 0.0);
+      return tx;
+    };
+    const texMaxima = cropDisc('/images/maxima.JPG');
+    const texMinima = cropDisc('/images/minima.jpg');
     // altavoz K.C.S.: solo la región frontal del atlas (rejilla + tweeter)
     const texSpeaker = loadTex('/images/speaker_diff.JPG');
     texSpeaker.repeat.set(0.829, 0.568);
@@ -136,6 +163,7 @@ export default function CinemaConfigurator() {
       std: new THREE.MeshStandardMaterial({ color: 0x4a4744, roughness: 0.92 }),
       vipMark: new THREE.MeshStandardMaterial({ color: 0xd8232a, roughness: 0.75 }),
       blocked: new THREE.MeshStandardMaterial({ color: 0x35323a, roughness: 0.95 }),
+      sold: new THREE.MeshStandardMaterial({ color: 0x221d26, roughness: 0.95 }),
       metal: new THREE.MeshStandardMaterial({ color: 0x8a8d94, metalness: 0.85, roughness: 0.35 }),
       shell: new THREE.MeshStandardMaterial({ color: 0x17161a, roughness: 0.6 }),
       tray: new THREE.MeshStandardMaterial({ color: 0x111013, roughness: 0.5 }),
@@ -149,38 +177,30 @@ export default function CinemaConfigurator() {
         emissive: 0x2b6bff,
         emissiveIntensity: 2.2,
       }),
-      sconceL: new THREE.MeshStandardMaterial({
-        map: texSconceL,
-        emissive: 0xbfe4ff,
-        emissiveMap: texSconceL,
-        emissiveIntensity: 1.5,
-        roughness: 0.85,
-      }),
-      sconceR: new THREE.MeshStandardMaterial({
-        map: texSconceR,
-        emissive: 0xbfe4ff,
-        emissiveMap: texSconceR,
-        emissiveIntensity: 1.5,
-        roughness: 0.85,
-      }),
       speakerFront: new THREE.MeshStandardMaterial({ map: texSpeaker, roughness: 0.85 }),
       speakerBox: new THREE.MeshStandardMaterial({ color: 0x0e0d10, roughness: 0.7 }),
+      discMax: new THREE.MeshBasicMaterial({ map: texMaxima, toneMapped: false }),
+      discMin: new THREE.MeshBasicMaterial({ map: texMinima, toneMapped: false }),
+      discPlain: new THREE.MeshStandardMaterial({ color: 0x060609, roughness: 0.4 }),
+      ring: new THREE.MeshStandardMaterial({
+        color: 0x0a1a3a,
+        emissive: 0x3b82f6,
+        emissiveIntensity: 2.4,
+      }),
       logo: new THREE.MeshBasicMaterial({ map: texLogo, toneMapped: false }),
+      slab: new THREE.MeshStandardMaterial({ color: 0x141218, roughness: 0.8 }),
+      heat: [
+        new THREE.MeshStandardMaterial({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.35, roughness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0xe8a013, emissive: 0xe8a013, emissiveIntensity: 0.35, roughness: 0.85 }),
+        new THREE.MeshStandardMaterial({ color: 0xd9480f, emissive: 0xd9480f, emissiveIntensity: 0.35, roughness: 0.85 }),
+      ],
     };
 
-    // geometrías unitarias compartidas (se escalan por mesh, nunca se disponen
-    // por regeneración)
+    // geometrías unitarias compartidas (se escalan por mesh, nunca se disponen)
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitPlane = new THREE.PlaneGeometry(1, 1);
 
-    // ---- pantalla curva + vídeo ----------------------------------------------
-    const screenGeo = new THREE.CylinderGeometry(
-      SCREEN.R, SCREEN.R, SCREEN.height, 64, 1, true,
-      Math.PI - SCREEN.halfTheta, SCREEN.halfTheta * 2
-    );
-    const screenGroup = new THREE.Group();
-    screenGroup.position.set(0, SCREEN.cy, SCREEN.cz);
-    scene.add(screenGroup);
+    // ---- vídeo + pantalla (la geometría se construye en cada regeneración) ---
     const video = document.createElement('video');
     video.src = TRAILER_URL;
     video.crossOrigin = 'anonymous';
@@ -190,25 +210,14 @@ export default function CinemaConfigurator() {
     video.preload = 'auto';
     const videoTex = new THREE.VideoTexture(video);
     videoTex.encoding = THREE.sRGBEncoding;
-    // el interior del cilindro invierte la U: des-espejar solo lo que va en la
-    // pantalla (el rótulo de la pared trasera usa texLogo sin voltear).
-    // En V se recorta el letterbox incrustado para que la imagen llene todo.
     videoTex.wrapS = THREE.RepeatWrapping;
-    videoTex.repeat.set(-1, VIDEO_CROP.h);
-    videoTex.offset.set(1, VIDEO_CROP.y);
-    const texLogoScreen = loadTex('/images/pantalla2.jpg');
-    // el logo es cuadrado: en la pantalla 2,35:1 se muestra su banda central
-    texLogoScreen.repeat.set(-1, 1 / 2.35);
-    texLogoScreen.offset.set(1, (1 - 1 / 2.35) / 2);
+    texLogoScreen.wrapS = THREE.RepeatWrapping;
 
     const screenMat = new THREE.MeshBasicMaterial({
       map: texLogoScreen, // logo del cine hasta que arranca el trailer
       side: THREE.BackSide,
       toneMapped: false,
     });
-    const screenMesh = new THREE.Mesh(screenGeo, screenMat);
-    screenGroup.add(screenMesh);
-
     video.addEventListener('playing', () => {
       screenMat.map = videoTex;
       screenMat.needsUpdate = true;
@@ -221,84 +230,169 @@ export default function CinemaConfigurator() {
     };
     window.addEventListener('pointerdown', gesturePlay);
 
-    // panel con grosor: carcasa trasera + tapas superior/inferior + cantos
-    const slabMat = new THREE.MeshStandardMaterial({ color: 0x141218, roughness: 0.8 });
-    const h = SCREEN.halfTheta;
-    const TH = SCREEN.thick;
-    const backShell = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        SCREEN.R + TH, SCREEN.R + TH, SCREEN.height, 64, 1, true,
-        Math.PI - h, h * 2
-      ),
-      slabMat
-    );
-    screenGroup.add(backShell);
-    const lidGeo = new THREE.RingGeometry(SCREEN.R, SCREEN.R + TH, 48, 1, Math.PI / 2 - h, h * 2);
-    const lidTop = new THREE.Mesh(lidGeo, slabMat);
-    lidTop.rotation.x = -Math.PI / 2;
-    lidTop.position.y = SCREEN.height / 2;
-    const lidBotGeo = new THREE.RingGeometry(SCREEN.R, SCREEN.R + TH, 48, 1, -Math.PI / 2 - h, h * 2);
-    const lidBot = new THREE.Mesh(lidBotGeo, slabMat);
-    lidBot.rotation.x = Math.PI / 2;
-    lidBot.position.y = -SCREEN.height / 2;
-    screenGroup.add(lidTop, lidBot);
-    const capGeo = new THREE.BoxGeometry(TH, SCREEN.height, 0.06);
-    for (const s of [-1, 1]) {
-      const cap = new THREE.Mesh(capGeo, slabMat);
-      const rMid = SCREEN.R + TH / 2;
-      cap.position.set(s * rMid * Math.sin(h), 0, -rMid * Math.cos(h));
-      cap.rotation.y = Math.PI / 2 - s * h;
-      screenGroup.add(cap);
+    const screenGroup = new THREE.Group();
+    scene.add(screenGroup);
+
+    // ---- audio posicional del trailer (arranca al pulsar 🔊) ------------------
+    const listener = new THREE.AudioListener();
+    camera.add(listener);
+    let posAudio = null;
+    try {
+      posAudio = new THREE.PositionalAudio(listener);
+      posAudio.setMediaElementSource(video);
+      posAudio.setRefDistance(9);
+      posAudio.setRolloffFactor(1.1);
+      scene.add(posAudio);
+    } catch (err) {
+      posAudio = null; // sin audio posicional: el vídeo sonará en estéreo
     }
 
-    // ---- plantilla butaca estándar (procedural, estilo Kinepolis) ------------
+    // recorte UV tipo "object-fit: cover": la imagen llena la superficie sin
+    // deformarse, recortando lo que sobre. En el cilindro visto desde dentro
+    // la U va invertida (espejo).
+    const coverUV = (tex, contentAspect, surfaceAspect, vBase) => {
+      const v0 = vBase ? vBase.y : 0;
+      const vh = vBase ? vBase.h : 1;
+      if (contentAspect >= surfaceAspect) {
+        const fw = surfaceAspect / contentAspect;
+        tex.repeat.set(-fw, vh);
+        tex.offset.set((1 + fw) / 2, v0);
+      } else {
+        const fh = contentAspect / surfaceAspect;
+        tex.repeat.set(-1, vh * fh);
+        tex.offset.set(1, v0 + (vh * (1 - fh)) / 2);
+      }
+    };
+
+    // construye la pantalla (superficie de vídeo + panel con grosor) para un
+    // ancho/alto dados. Se llama en cada regeneración.
+    const buildScreen = (hallW, screenWPct, screenHParam) => {
+      const t = T.current;
+      // limpiar la construcción anterior (geometrías propias → dispose)
+      [...screenGroup.children].forEach((ch) => {
+        screenGroup.remove(ch);
+        if (ch.geometry) ch.geometry.dispose();
+      });
+
+      const W = Math.max(4, (hallW - 0.8) * (screenWPct / 100));
+      const H = Math.min(screenHParam, HALL_H - SCREEN_BOTTOM - 0.4);
+      const halfW = W / 2;
+      const R = Math.max(16, halfW * 2.2); // radio grande → curvatura suave
+      const h = Math.asin(halfW / R);
+      const cy = SCREEN_BOTTOM + H / 2;
+      const cz = SCREEN_Z + R;
+      const TH = 0.3; // grosor del panel
+
+      screenGroup.position.set(0, cy, cz);
+
+      const surf = new THREE.Mesh(
+        new THREE.CylinderGeometry(R, R, H, 64, 1, true, Math.PI - h, h * 2),
+        screenMat
+      );
+      screenGroup.add(surf);
+
+      const backShell = new THREE.Mesh(
+        new THREE.CylinderGeometry(R + TH, R + TH, H, 64, 1, true, Math.PI - h, h * 2),
+        mats.slab
+      );
+      screenGroup.add(backShell);
+
+      const lidTop = new THREE.Mesh(
+        new THREE.RingGeometry(R, R + TH, 48, 1, Math.PI / 2 - h, h * 2),
+        mats.slab
+      );
+      lidTop.rotation.x = -Math.PI / 2;
+      lidTop.position.y = H / 2;
+      const lidBot = new THREE.Mesh(
+        new THREE.RingGeometry(R, R + TH, 48, 1, -Math.PI / 2 - h, h * 2),
+        mats.slab
+      );
+      lidBot.rotation.x = Math.PI / 2;
+      lidBot.position.y = -H / 2;
+      screenGroup.add(lidTop, lidBot);
+
+      for (const s of [-1, 1]) {
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(TH, H, 0.06), mats.slab);
+        const rMid = R + TH / 2;
+        cap.position.set(s * rMid * Math.sin(h), 0, -rMid * Math.cos(h));
+        cap.rotation.y = Math.PI / 2 - s * h;
+        screenGroup.add(cap);
+      }
+
+      // encaje del vídeo/logo sin deformación (cover) sobre el arco real
+      const surfaceAspect = (2 * h * R) / H;
+      coverUV(videoTex, VIDEO_ASPECT, surfaceAspect, VIDEO_CROP);
+      coverUV(texLogoScreen, 1, surfaceAspect, null);
+
+      t.screenInfo = { W, H, cy };
+      t.screenCenter.set(0, cy, SCREEN_Z);
+      projLight.position.set(0, cy, SCREEN_Z + 3.5);
+      if (posAudio) posAudio.position.set(0, cy, SCREEN_Z + 0.5);
+    };
+
+    // ---- plantillas de butaca (fusionadas en pocos meshes por butaca) --------
+    // bake: aplasta un grupo de primitivas en 1 mesh por material — de ~11
+    // draw calls por butaca a 3 (clave para salas de 700+ butacas)
+    const bakeTemplate = (group) => {
+      group.updateMatrixWorld(true);
+      const buckets = new Map();
+      group.traverse((m) => {
+        if (!m.isMesh) return;
+        const swap = m.name === 'swap';
+        const key = swap ? 'swap' : m.material.uuid;
+        if (!buckets.has(key)) buckets.set(key, { mat: m.material, swap, geos: [] });
+        const g = m.geometry.clone();
+        g.applyMatrix4(m.matrixWorld);
+        buckets.get(key).geos.push(g);
+      });
+      const out = new THREE.Group();
+      for (const b of buckets.values()) {
+        const merged = BufferGeometryUtils.mergeBufferGeometries(b.geos, false);
+        b.geos.forEach((g) => g.dispose());
+        const mesh = new THREE.Mesh(merged, b.mat);
+        if (b.swap) mesh.name = 'swap';
+        mesh.castShadow = true;
+        out.add(mesh);
+      }
+      return out;
+    };
+
     function buildStandardTemplate() {
       const g = new THREE.Group();
-      const add = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1, swap = false) => {
+      const cyl = new THREE.CylinderGeometry(1, 1, 1, 12);
+      const add = (parent, geo, mat, x, y, z, sx, sy, sz, swap = false) => {
         const m = new THREE.Mesh(geo, mat);
         m.position.set(x, y, z);
         m.scale.set(sx, sy, sz);
         if (swap) m.name = 'swap';
-        m.castShadow = true;
-        g.add(m);
+        parent.add(m);
         return m;
       };
-      const cyl = new THREE.CylinderGeometry(1, 1, 1, 12);
       // placa cuadrada + pie central metálico (sin patas)
-      add(unitBox, mats.metal, 0, 0.012, 0.04, 0.42, 0.024, 0.42);
-      add(cyl, mats.metal, 0, 0.19, 0.04, 0.045, 0.34, 0.045);
+      add(g, unitBox, mats.metal, 0, 0.012, 0.04, 0.42, 0.024, 0.42);
+      add(g, cyl, mats.metal, 0, 0.19, 0.04, 0.045, 0.34, 0.045);
       // cojín grueso con frontal redondeado
-      add(unitBox, mats.std, 0, 0.43, 0.02, 0.5, 0.15, 0.46, true);
-      const front = add(cyl, mats.std, 0, 0.43, -0.215, 0.075, 0.5, 0.075, true);
+      add(g, unitBox, mats.std, 0, 0.43, 0.02, 0.5, 0.15, 0.46, true);
+      const front = add(g, cyl, mats.std, 0, 0.43, -0.215, 0.075, 0.5, 0.075, true);
       front.rotation.z = Math.PI / 2;
       // respaldo inclinado ~8° (grupo pivotado)
       const tilt = new THREE.Group();
       tilt.position.set(0, 0.36, 0.17);
       tilt.rotation.x = (8 * Math.PI) / 180;
       g.add(tilt);
-      const addT = (geo, mat, x, y, z, sx, sy, sz, swap = false) => {
-        const m = new THREE.Mesh(geo, mat);
-        m.position.set(x, y, z);
-        m.scale.set(sx, sy, sz);
-        if (swap) m.name = 'swap';
-        m.castShadow = true;
-        tilt.add(m);
-        return m;
-      };
-      addT(unitBox, mats.std, 0, 0.3, 0.02, 0.5, 0.58, 0.11, true); // respaldo
-      const top = addT(cyl, mats.std, 0, 0.59, 0.02, 0.055, 0.5, 0.055, true);
+      add(tilt, unitBox, mats.std, 0, 0.3, 0.02, 0.5, 0.58, 0.11, true); // respaldo
+      const top = add(tilt, cyl, mats.std, 0, 0.59, 0.02, 0.055, 0.5, 0.055, true);
       top.rotation.z = Math.PI / 2; // remate superior redondeado
-      addT(unitBox, mats.std, 0, 0.09, -0.05, 0.44, 0.22, 0.06, true); // lumbar
-      addT(unitBox, mats.shell, 0, 0.31, 0.09, 0.53, 0.66, 0.035); // carcasa
+      add(tilt, unitBox, mats.std, 0, 0.09, -0.05, 0.44, 0.22, 0.06, true); // lumbar
+      add(tilt, unitBox, mats.shell, 0, 0.31, 0.09, 0.53, 0.66, 0.035); // carcasa
       // reposabrazos flotantes sobre soporte fino
       for (const s of [-1, 1]) {
-        add(cyl, mats.metal, s * 0.31, 0.4, 0.06, 0.018, 0.32, 0.018);
-        add(unitBox, mats.std, s * 0.31, 0.585, 0.02, 0.11, 0.055, 0.42, true);
+        add(g, cyl, mats.metal, s * 0.31, 0.4, 0.06, 0.018, 0.32, 0.018);
+        add(g, unitBox, mats.std, s * 0.31, 0.585, 0.02, 0.11, 0.055, 0.42, true);
       }
-      return g;
+      return bakeTemplate(g);
     }
 
-    // ---- plantilla VIP procedural (fallback hasta que carga el .dae) ---------
     function buildVipFallbackTemplate() {
       const g = new THREE.Group();
       const cyl = new THREE.CylinderGeometry(1, 1, 1, 12);
@@ -307,7 +401,6 @@ export default function CinemaConfigurator() {
         m.position.set(x, y, z);
         m.scale.set(sx, sy, sz);
         if (swap) m.name = 'swap';
-        m.castShadow = true;
         parent.add(m);
         return m;
       };
@@ -327,29 +420,40 @@ export default function CinemaConfigurator() {
         add(g, unitBox, mats.vipMark, s * 0.37, 0.5, 0, 0.13, 0.1, 0.46, true);
       // brazo-bandeja negro con portavasos (derecha)
       add(g, unitBox, mats.tray, 0.49, 0.52, -0.05, 0.16, 0.035, 0.3);
-      const cup = add(g, cyl, mats.tray, 0.49, 0.55, -0.14, 0.05, 0.05, 0.05);
-      cup.rotation.x = 0;
-      return g;
+      add(g, cyl, mats.tray, 0.49, 0.55, -0.14, 0.05, 0.05, 0.05);
+      return bakeTemplate(g);
     }
 
     // ---- estado three --------------------------------------------------------
     T.current = {
       renderer, scene, camera, mats, unitBox, unitPlane, video, videoTex,
-      projLight, spot,
+      projLight, spot, screenGroup, buildScreen, posAudio, listener,
       stdTemplate: buildStandardTemplate(),
       vipTemplate: buildVipFallbackTemplate(),
       vipModel: 'proc', // 'proc' | 'dae'
       vipBaseMats: {}, // nombre de mesh -> material original del dae
-      seatsGroup: null, standGroup: null, roomGroup: null,
-      seatList: [], // [{key, autoVip, group}]
+      seatsGroup: null, standGroup: null, roomGroup: null, signsGroup: null,
+      seatList: [], // [{key, autoVip}]
+      occupiedSet: new Set(),
+      disposables: [], // geometrías creadas por regeneración
+      labelCache: {}, // texto -> material con CanvasTexture (números de fila)
+      rowBands: [], // [{z0, z1, y}] para colisión de cámara con el graderío
+      hallBounds: { halfW: 10, zBack: 20 },
+      screenInfo: { W: 12, H: 8, cy: 5 },
+      screenCenter: new THREE.Vector3(0, 5, SCREEN_Z),
       orbit: { theta: 0, phi: 0.16, radius: 30, target: new THREE.Vector3(0, 0, 3) },
       homeView: { theta: 0, phi: 0.16, radius: 30, target: new THREE.Vector3(0, 0, 3) },
-      pov: { active: false, eye: new THREE.Vector3(), yaw: 0, pitch: 0, prevOrbit: null },
+      pov: { active: false, eye: new THREE.Vector3(), yaw: 0, pitch: 0 },
       flight: null,
       lastLookTarget: new THREE.Vector3(0, 0, 3),
       raycaster: new THREE.Raycaster(),
       pointers: new Map(),
       downInfo: null,
+      painting: false,
+      lastPaintKey: null,
+      lastPaintTime: 0,
+      lastHoverTime: 0,
+      lastTintTime: 0,
       pinchDist: 0,
       raf: 0,
     };
@@ -417,6 +521,16 @@ export default function CinemaConfigurator() {
         o.target.z + o.radius * Math.sin(o.phi) * Math.cos(o.theta)
       );
 
+    // altura del graderío bajo un punto (colisión suave de cámara)
+    const standTopAt = (x, z) => {
+      const t = T.current;
+      if (Math.abs(x) > t.hallBounds.halfW + 1.5) return 0;
+      for (const band of t.rowBands) {
+        if (z >= band.z0 && z <= band.z1) return band.y;
+      }
+      return 0;
+    };
+
     const flyTo = (toPos, toTgt, onDone) => {
       const t = T.current;
       t.flight = {
@@ -436,15 +550,29 @@ export default function CinemaConfigurator() {
         Math.cos(pitch) * Math.cos(yaw)
       );
 
+    // ---- tooltip de butaca -----------------------------------------------------
+    const hideTip = () => {
+      if (tipRef.current) tipRef.current.style.display = 'none';
+    };
+    const showTip = (x, y, text) => {
+      const el2 = tipRef.current;
+      if (!el2) return;
+      el2.textContent = text;
+      el2.style.display = 'block';
+      el2.style.left = `${x + 14}px`;
+      el2.style.top = `${y + 14}px`;
+    };
+
     const enterPovAt = (seatGroup) => {
       const t = T.current;
       const p = seatGroup.getWorldPosition(new THREE.Vector3());
       const eye = new THREE.Vector3(p.x, p.y + 1.15, p.z);
       setPanelOpen(false);
-      flyTo(eye, SCREEN_CENTER, () => {
+      hideTip();
+      flyTo(eye, t.screenCenter, () => {
         t.pov.active = true;
         t.pov.eye.copy(eye);
-        const d = SCREEN_CENTER.clone().sub(eye).normalize();
+        const d = t.screenCenter.clone().sub(eye).normalize();
         t.pov.yaw = Math.atan2(d.x, d.z);
         t.pov.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
         setPovUI(true);
@@ -466,11 +594,58 @@ export default function CinemaConfigurator() {
       });
     };
 
+    // ---- picking ----------------------------------------------------------------
+    const pickAt = (clientX, clientY) => {
+      const t = T.current;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+      );
+      t.raycaster.setFromCamera(ndc, camera);
+      const targets = [t.seatsGroup, t.signsGroup].filter(Boolean);
+      if (!targets.length) return null;
+      const hits = t.raycaster.intersectObjects(targets, true);
+      for (const hh of hits) {
+        let o = hh.object;
+        if (o.userData.rowSign !== undefined) return { sign: o.userData.rowSign };
+        while (o && !o.userData.isSeat) o = o.parent;
+        if (o) return { seat: o };
+      }
+      return null;
+    };
+
+    const applyModeTo = (seat) => {
+      const m = modeRef.current;
+      const key = seat.userData.key;
+      if (m === 'vip') seatStates.current.set(key, 'vip');
+      else if (m === 'block') seatStates.current.set(key, 'blocked');
+      else if (m === 'clear') seatStates.current.delete(key);
+      applySeatState(seat);
+      recount();
+    };
+
+    const applyModeToRow = (row) => {
+      const t = T.current;
+      const m = modeRef.current;
+      for (const seat of t.seatsGroup.children) {
+        if (seat.userData.row !== row) continue;
+        const key = seat.userData.key;
+        if (m === 'vip') seatStates.current.set(key, 'vip');
+        else if (m === 'block') seatStates.current.set(key, 'blocked');
+        else if (m === 'clear') seatStates.current.delete(key);
+        applySeatState(seat);
+      }
+      recount();
+    };
+
     // ---- interacción: puntero / táctil / rueda --------------------------------
     const el = renderer.domElement;
+    const MARK_MODES = ['vip', 'block', 'clear'];
 
     const onPointerDown = (e) => {
       const t = T.current;
+      hideTip();
       // un ratón solo puede tener un puntero: purga posibles "fantasmas"
       // (pointerup perdidos) que bloquearían los clicks para siempre
       if (e.pointerType === 'mouse') t.pointers.clear();
@@ -481,11 +656,47 @@ export default function CinemaConfigurator() {
       }
       t.downInfo = { x: e.clientX, y: e.clientY, dragged: false };
       el.setPointerCapture && el.setPointerCapture(e.pointerId);
+
+      // modo pintar: si el gesto EMPIEZA sobre una butaca en un modo de marcado,
+      // el arrastre marca butacas en vez de orbitar
+      if (
+        !t.flight && !t.pov.active &&
+        t.pointers.size === 1 &&
+        MARK_MODES.includes(modeRef.current)
+      ) {
+        const res = pickAt(e.clientX, e.clientY);
+        if (res && res.seat) {
+          t.painting = true;
+          t.lastPaintKey = res.seat.userData.key;
+          applyModeTo(res.seat);
+        }
+      }
     };
 
     const onPointerMove = (e) => {
       const t = T.current;
-      if (!t.pointers.has(e.pointerId)) return;
+      if (!t.pointers.has(e.pointerId)) {
+        // puntero sin botón pulsado → hover con tooltip
+        const now = performance.now();
+        if (t.pov.active || t.flight || now - t.lastHoverTime < 90) return;
+        t.lastHoverTime = now;
+        const res = pickAt(e.clientX, e.clientY);
+        if (res && res.seat) {
+          const u = res.seat.userData;
+          const st = seatStates.current.get(u.key);
+          let extra = '';
+          if (st === 'blocked') extra = ' · Bloqueada';
+          else if (t.occupiedSet.has(u.key)) extra = ' · Vendida';
+          else if (st === 'vip' || u.autoVip) extra = ' · VIP';
+          showTip(e.clientX, e.clientY, `Fila ${u.row + 1} · Butaca ${u.col + 1}${extra}`);
+        } else if (res && res.sign !== undefined) {
+          showTip(e.clientX, e.clientY, `Fila ${res.sign + 1} — toca para marcar toda la fila`);
+        } else {
+          hideTip();
+        }
+        return;
+      }
+
       const prev = t.pointers.get(e.pointerId);
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
@@ -497,6 +708,18 @@ export default function CinemaConfigurator() {
         if (Math.hypot(totalDx, totalDy) > 6) t.downInfo.dragged = true;
       }
       if (t.flight) return;
+
+      if (t.painting) {
+        const now = performance.now();
+        if (now - t.lastPaintTime < 40) return;
+        t.lastPaintTime = now;
+        const res = pickAt(e.clientX, e.clientY);
+        if (res && res.seat && res.seat.userData.key !== t.lastPaintKey) {
+          t.lastPaintKey = res.seat.userData.key;
+          applyModeTo(res.seat);
+        }
+        return;
+      }
 
       if (t.pointers.size === 2) {
         // pellizco = zoom (solo vista orbital)
@@ -525,37 +748,29 @@ export default function CinemaConfigurator() {
       const t = T.current;
       t.pointers.delete(e.pointerId);
       const info = t.downInfo;
-      t.downInfo = null;
+      const wasPainting = t.painting;
+      if (t.pointers.size === 0) {
+        t.downInfo = null;
+        t.painting = false;
+        t.lastPaintKey = null;
+      }
+      if (wasPainting) return; // el pintado ya aplicó los cambios
       if (!info || info.dragged || t.flight || t.pointers.size > 0) return;
 
-      // click limpio → raycast a butacas
-      const rect = el.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
-      );
-      t.raycaster.setFromCamera(ndc, camera);
-      if (!t.seatsGroup) return;
-      const hits = t.raycaster.intersectObjects(t.seatsGroup.children, true);
-      let seat = null;
-      for (const h of hits) {
-        let o = h.object;
-        while (o && !o.userData.isSeat) o = o.parent;
-        if (o) { seat = o; break; }
+      // click limpio → raycast a butacas y rótulos de fila
+      const res = pickAt(e.clientX, e.clientY);
+      if (!res) return;
+      if (res.sign !== undefined) {
+        if (MARK_MODES.includes(modeRef.current)) applyModeToRow(res.sign);
+        return;
       }
-      if (!seat) return;
-
+      const seat = res.seat;
       const m = modeRef.current;
       if (m === 'pov' || t.pov.active) {
         enterPovAt(seat);
         return;
       }
-      const key = seat.userData.key;
-      if (m === 'vip') seatStates.current.set(key, 'vip');
-      else if (m === 'block') seatStates.current.set(key, 'blocked');
-      else if (m === 'clear') seatStates.current.delete(key);
-      applySeatState(seat);
-      recount();
+      applyModeTo(seat);
     };
 
     const onWheel = (e) => {
@@ -586,10 +801,33 @@ export default function CinemaConfigurator() {
       const t = T.current;
       const now = performance.now();
 
-      // parpadeo sutil de la "proyección"
+      // tinte de la luz de proyección con el color medio del fotograma
+      if (now - t.lastTintTime > 240 && video.readyState >= 2 && !video.paused) {
+        t.lastTintTime = now;
+        try {
+          tintCtx.drawImage(video, 0, 0, 4, 4);
+          const d = tintCtx.getImageData(0, 0, 4, 4).data;
+          let r = 0, g = 0, b = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            r += d[i]; g += d[i + 1]; b += d[i + 2];
+          }
+          const n = d.length / 4;
+          r /= 255 * n; g /= 255 * n; b /= 255 * n;
+          tintBrightness = Math.max(r, g, b);
+          const v = Math.max(tintBrightness, 0.001);
+          // normaliza el tono y mézclalo con un azul base de proyector
+          tintColor.setRGB(
+            (r / v) * 0.85 + 0.15 * 0.48,
+            (g / v) * 0.85 + 0.15 * 0.65,
+            (b / v) * 0.85 + 0.15 * 1.0
+          );
+        } catch (err) { /* el fotograma aún no está disponible */ }
+      }
       const s = now * 0.001;
-      projLight.intensity =
-        1.15 + 0.28 * Math.sin(s * 13.7) * Math.sin(s * 7.3) + 0.1 * Math.sin(s * 2.1);
+      const flicker =
+        1 + 0.22 * Math.sin(s * 13.7) * Math.sin(s * 7.3) + 0.08 * Math.sin(s * 2.1);
+      projLight.color.lerp(tintColor, 0.12);
+      projLight.intensity = flicker * (0.55 + 1.5 * tintBrightness);
 
       if (t.flight) {
         const k = Math.min(1, (now - t.flight.t0) / FLY_MS);
@@ -603,12 +841,21 @@ export default function CinemaConfigurator() {
           done && done();
         }
       } else if (t.pov.active) {
-        camera.position.copy(t.pov.eye);
+        // balanceo de cabeza muy sutil
+        camera.position.set(
+          t.pov.eye.x,
+          t.pov.eye.y + Math.sin(now * 0.0013) * 0.012,
+          t.pov.eye.z
+        );
         const d = dirFromYawPitch(t.pov.yaw, t.pov.pitch);
-        t.lastLookTarget.copy(t.pov.eye).add(d);
+        t.lastLookTarget.copy(camera.position).add(d);
         camera.lookAt(t.lastLookTarget);
       } else {
-        camera.position.copy(orbitPos(t.orbit));
+        const pos = orbitPos(t.orbit);
+        // no dejar que la cámara se hunda en el graderío ni bajo el suelo
+        const minY = Math.max(0.6, standTopAt(pos.x, pos.z) + 0.9);
+        if (pos.y < minY) pos.y = minY;
+        camera.position.copy(pos);
         t.lastLookTarget.copy(t.orbit.target);
         camera.lookAt(t.orbit.target);
       }
@@ -632,6 +879,9 @@ export default function CinemaConfigurator() {
       video.pause();
       video.removeAttribute('src');
       video.load();
+      if (posAudio) {
+        try { posAudio.disconnect(); } catch (err) { /* ya desconectado */ }
+      }
       renderer.dispose();
       mount.removeChild(renderer.domElement);
       T.current = null;
@@ -641,18 +891,23 @@ export default function CinemaConfigurator() {
 
   // --------------------------------------------------------------------------
   // Estado visual de una butaca (solo material, nunca la geometría)
+  // Prioridad: mapa de visión > bloqueada > vendida > VIP marcada > base
   // --------------------------------------------------------------------------
   const applySeatState = useCallback((seatGroup) => {
     const t = T.current;
     if (!t) return;
-    const state = seatStates.current.get(seatGroup.userData.key) || null;
+    const key = seatGroup.userData.key;
+    const state = seatStates.current.get(key) || null;
     const isDae = seatGroup.userData.model === 'dae';
     const isVipProc = seatGroup.userData.model === 'vipproc';
+    let override = null;
+    if (heatRef.current) override = t.mats.heat[seatGroup.userData.heat || 0];
+    else if (state === 'blocked') override = t.mats.blocked;
+    else if (t.occupiedSet.has(key)) override = t.mats.sold;
+    else if (state === 'vip' && !isDae) override = t.mats.vipMark;
     seatGroup.traverse((m) => {
       if (!m.isMesh || !m.name.startsWith('swap')) return;
-      if (state === 'blocked') m.material = t.mats.blocked;
-      else if (state === 'vip')
-        m.material = isDae ? t.vipBaseMats[m.name] : t.mats.vipMark;
+      if (override) m.material = override;
       else
         m.material = isDae
           ? t.vipBaseMats[m.name]
@@ -665,39 +920,56 @@ export default function CinemaConfigurator() {
   const recount = useCallback(() => {
     const t = T.current;
     if (!t) return;
-    let vip = 0, blocked = 0;
+    let vip = 0, blocked = 0, sold = 0;
     for (const s of t.seatList) {
       const st = seatStates.current.get(s.key);
-      if (st === 'blocked') blocked++;
-      else if (s.autoVip || st === 'vip') vip++;
+      if (st === 'blocked') { blocked++; continue; }
+      if (t.occupiedSet.has(s.key)) sold++;
+      if (s.autoVip || st === 'vip') vip++;
     }
-    setCounts({ total: t.seatList.length, vip, blocked });
+    setCounts({ total: t.seatList.length, vip, blocked, sold });
   }, []);
 
+  // toggle del mapa de calidad de visión: solo cambia materiales
+  useEffect(() => {
+    heatRef.current = heatOn;
+    const t = T.current;
+    if (!t || !t.seatsGroup) return;
+    for (const seat of t.seatsGroup.children) applySeatState(seat);
+  }, [heatOn, applySeatState]);
+
   // --------------------------------------------------------------------------
-  // Regeneración procedural de la sala (butacas + graderío + sala)
+  // Regeneración procedural de la sala
   // --------------------------------------------------------------------------
   useEffect(() => {
     const t = T.current;
     if (!t) return;
     const { scene, mats, unitBox, unitPlane } = t;
-    const { rows, cols, vipRows, curvature, slope, spacing, aisle } = params;
+    const {
+      rows, cols, vipRows, curvature, slope, spacing, aisle,
+      occupancy, screenWPct, screenH,
+    } = params;
 
-    for (const k of ['seatsGroup', 'standGroup', 'roomGroup']) {
+    for (const k of ['seatsGroup', 'standGroup', 'roomGroup', 'signsGroup']) {
       if (t[k]) {
         scene.remove(t[k]);
         t[k] = null;
       }
     }
+    t.disposables.forEach((d) => d.dispose());
+    t.disposables = [];
 
     const seatsGroup = new THREE.Group();
     const standGroup = new THREE.Group();
     const roomGroup = new THREE.Group();
+    const signsGroup = new THREE.Group();
     t.seatsGroup = seatsGroup;
     t.standGroup = standGroup;
     t.roomGroup = roomGroup;
-    scene.add(seatsGroup, standGroup, roomGroup);
+    t.signsGroup = signsGroup;
+    scene.add(seatsGroup, standGroup, roomGroup, signsGroup);
     t.seatList = [];
+    t.rowBands = [];
 
     const c = curvature / 100;
     const R = 150 - 137 * c; // radio del arco (decrece al curvar más)
@@ -712,6 +984,44 @@ export default function CinemaConfigurator() {
     const halfW = maxRowWidth / 2;
     const stairX = halfW + 0.95;
 
+    // dimensiones de la sala (la pantalla depende del ancho)
+    const hallW = maxRowWidth + 5.5;
+    const zFront = -10.6;
+
+    // pantalla parametrizable (por defecto: todo el ancho, casi todo el alto)
+    t.buildScreen(hallW, screenWPct, screenH);
+
+    // ocupación simulada, estable por butaca
+    t.occupiedSet = new Set();
+
+    // rótulos de fila (texturas canvas cacheadas)
+    const rowLabelMat = (nLabel) => {
+      const text = String(nLabel);
+      if (!t.labelCache[text]) {
+        const cv = document.createElement('canvas');
+        cv.width = 96;
+        cv.height = 64;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#0c0c14';
+        ctx.fillRect(0, 0, 96, 64);
+        ctx.strokeStyle = '#2b6bff';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(3, 3, 90, 58);
+        ctx.fillStyle = '#dfe7ff';
+        ctx.font = 'bold 40px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 48, 34);
+        const tx = new THREE.CanvasTexture(cv);
+        tx.encoding = THREE.sRGBEncoding;
+        t.labelCache[text] = new THREE.MeshBasicMaterial({
+          map: tx,
+          toneMapped: false,
+        });
+      }
+      return t.labelCache[text];
+    };
+
     let z = Z_START;
     let lastZBack = Z_START;
 
@@ -724,6 +1034,7 @@ export default function CinemaConfigurator() {
       const zRow = z;
       z += depth;
       lastZBack = zRow + depth;
+      t.rowBands.push({ z0: zRow - 0.6, z1: zRow + depth + 0.2, y });
 
       const Rr = R + (zRow - Z_START);
       const maxHalfArc = ((n - 1) * sp + (aisle ? AISLE_W : 0)) / 2;
@@ -739,7 +1050,7 @@ export default function CinemaConfigurator() {
       plat.receiveShadow = true;
       standGroup.add(plat);
 
-      // escaleras laterales + tira LED azul
+      // escaleras laterales + tira LED azul + rótulo de fila
       for (const sx of [-1, 1]) {
         const step = new THREE.Mesh(unitBox, mats.stair);
         step.scale.set(1.25, platH, depth);
@@ -750,6 +1061,21 @@ export default function CinemaConfigurator() {
         led.scale.set(1.25, 0.025, 0.06);
         led.position.set(sx * stairX, y + 0.012, zRow - 0.2 + 0.03);
         standGroup.add(led);
+
+        const sign = new THREE.Mesh(unitPlane, rowLabelMat(r + 1));
+        sign.scale.set(0.5, 0.34, 1);
+        sign.rotation.x = -Math.PI / 2;
+        sign.position.set(sx * stairX, y + 0.02, zRow + depth / 2 - 0.1);
+        sign.userData.rowSign = r;
+        signsGroup.add(sign);
+      }
+
+      // tiras LED del pasillo central
+      if (aisle) {
+        const strip = new THREE.Mesh(unitBox, mats.led);
+        strip.scale.set(AISLE_W - 0.2, 0.02, 0.06);
+        strip.position.set(0, y + 0.011, zRow - 0.17);
+        standGroup.add(strip);
       }
 
       // butacas de la fila
@@ -774,13 +1100,31 @@ export default function CinemaConfigurator() {
         seat.position.set(px, y, pz);
         seat.rotation.y = rotY;
         const key = `${r}-${i}`;
+
+        // calidad de visión: ángulo hacia el borde superior de la pantalla +
+        // desviación lateral (0 verde · 1 ámbar · 2 rojo)
+        const eyeY = y + 1.15;
+        const distXZ = Math.hypot(px, pz - SCREEN_Z);
+        const upTop = Math.atan2(
+          t.screenInfo.cy + t.screenInfo.H / 2 - eyeY,
+          distXZ
+        );
+        const lat = Math.atan2(Math.abs(px), pz - SCREEN_Z);
+        const score = Math.max(0, upTop) + lat * 0.5;
+        const heat = score < 0.42 ? 0 : score < 0.6 ? 1 : 2;
+
         seat.userData = {
           isSeat: true,
           key,
+          row: r,
+          col: i,
+          autoVip: isVipRow,
+          heat,
           model: isVipRow ? (t.vipModel === 'dae' ? 'dae' : 'vipproc') : 'std',
         };
         seatsGroup.add(seat);
         t.seatList.push({ key, autoVip: isVipRow });
+        if (hash01(key) < occupancy / 100) t.occupiedSet.add(key);
         applySeatState(seat);
       }
     }
@@ -788,16 +1132,14 @@ export default function CinemaConfigurator() {
     seatsGroup.updateMatrixWorld(true);
     seatsGroup.traverse((o) => (o.matrixAutoUpdate = false));
 
-    // ---- sala (suelo, paredes, techo, paneles LED, logo) ---------------------
-    const hallW = Math.max(maxRowWidth + 5.5, 2 * (SCREEN.R * Math.sin(SCREEN.halfTheta)) + 4);
-    const zFront = -10.6;
+    // ---- sala (suelo, paredes, techo, discos, altavoces, logo) ----------------
     const zBack = lastZBack + 2.6;
     const hallD = zBack - zFront;
-    const hallH = 9.6;
     const zMid = (zFront + zBack) / 2;
+    t.hallBounds = { halfW: hallW / 2, zBack };
 
     mats.floor.map.repeat.set(hallW / 3.2, hallD / 3.2);
-    mats.wall.map.repeat.set(hallD / 4.5, hallH / 4.5);
+    mats.wall.map.repeat.set(hallD / 4.5, HALL_H / 4.5);
 
     const floor = new THREE.Mesh(unitPlane, mats.floor);
     floor.scale.set(hallW, hallD, 1);
@@ -809,7 +1151,7 @@ export default function CinemaConfigurator() {
     const ceiling = new THREE.Mesh(unitPlane, mats.ceiling);
     ceiling.scale.set(hallW, hallD, 1);
     ceiling.rotation.x = Math.PI / 2;
-    ceiling.position.set(0, hallH, zMid);
+    ceiling.position.set(0, HALL_H, zMid);
     roomGroup.add(ceiling);
 
     const mkWall = (w, h) => {
@@ -819,33 +1161,55 @@ export default function CinemaConfigurator() {
       roomGroup.add(m);
       return m;
     };
-    const wallL = mkWall(hallD, hallH);
+    const wallL = mkWall(hallD, HALL_H);
     wallL.rotation.y = Math.PI / 2;
-    wallL.position.set(-hallW / 2, hallH / 2, zMid);
-    const wallR = mkWall(hallD, hallH);
+    wallL.position.set(-hallW / 2, HALL_H / 2, zMid);
+    const wallR = mkWall(hallD, HALL_H);
     wallR.rotation.y = -Math.PI / 2;
-    wallR.position.set(hallW / 2, hallH / 2, zMid);
-    const wallBack = mkWall(hallW, hallH);
+    wallR.position.set(hallW / 2, HALL_H / 2, zMid);
+    const wallBack = mkWall(hallW, HALL_H);
     wallBack.rotation.y = Math.PI;
-    wallBack.position.set(0, hallH / 2, zBack);
-    const wallFront = mkWall(hallW, hallH);
-    wallFront.position.set(0, hallH / 2, zFront);
+    wallBack.position.set(0, HALL_H / 2, zBack);
+    const wallFront = mkWall(hallW, HALL_H);
+    wallFront.position.set(0, HALL_H / 2, zFront);
 
-    // decoración de paredes con los assets originales del cine: apliques
-    // triangulares de LEDs azules (luces.JPG) alternados con altavoces K.C.S.
-    const mkSconce = () => {
+    // discos "IMMERSIÓ" (asset original): disco negro + aro LED azul emisivo,
+    // tamaños y alturas variadas como en la sala real
+    const mkDisc = (radius, kind) => {
       const g = new THREE.Group();
-      const faceL = new THREE.Mesh(unitPlane, mats.sconceL);
-      faceL.scale.set(0.56, 1.15, 1);
-      faceL.position.x = -0.27;
-      faceL.rotation.y = 0.5;
-      const faceR = new THREE.Mesh(unitPlane, mats.sconceR);
-      faceR.scale.set(0.56, 1.15, 1);
-      faceR.position.x = 0.27;
-      faceR.rotation.y = -0.5;
-      g.add(faceL, faceR);
+      const discGeo = new THREE.CircleGeometry(radius, 40);
+      t.disposables.push(discGeo);
+      const mat =
+        kind === 0 ? mats.discMax : kind === 1 ? mats.discMin : mats.discPlain;
+      const disc = new THREE.Mesh(discGeo, mat);
+      g.add(disc);
+      const ringGeo = new THREE.TorusGeometry(radius * 1.01, 0.032, 8, 48);
+      t.disposables.push(ringGeo);
+      const ring = new THREE.Mesh(ringGeo, mats.ring);
+      ring.position.z = -0.015;
+      g.add(ring);
       return g;
     };
+    const nDiscs = Math.max(4, Math.floor(hallD / 4.2));
+    for (const sx of [-1, 1]) {
+      for (let i = 0; i < nDiscs; i++) {
+        const h1 = hash01(`disc${sx}-${i}-a`);
+        const h2 = hash01(`disc${sx}-${i}-b`);
+        const h3 = hash01(`disc${sx}-${i}-c`);
+        const radius = 0.32 + h1 * 0.5;
+        const pz =
+          zFront + 3 + ((i + 0.5) / nDiscs) * (hallD - 5) + (h2 - 0.5) * 1.6;
+        const py = 5.1 + h3 * (HALL_H - 5.1 - radius - 0.4);
+        // uno de cada tres lleva el rótulo neón (alterna màxima/mínima)
+        const kind = i % 3 === 0 ? i % 2 : 2;
+        const disc = mkDisc(radius, kind);
+        disc.position.set(sx * (hallW / 2 - 0.06), py, pz);
+        disc.rotation.y = (sx * -Math.PI) / 2;
+        roomGroup.add(disc);
+      }
+    }
+
+    // altavoces K.C.S. a media altura, bajo los discos
     const mkSpeaker = () => {
       const box = new THREE.Mesh(unitBox, [
         mats.speakerBox, mats.speakerBox, mats.speakerBox,
@@ -854,34 +1218,26 @@ export default function CinemaConfigurator() {
       box.scale.set(1.1, 0.75, 0.42);
       return box;
     };
-    const nSlots = Math.max(3, Math.floor(hallD / 5.5));
-    for (let i = 0; i < nSlots; i++) {
-      const pz = zFront + 3.5 + (i + 0.5) * ((hallD - 5) / nSlots);
-      for (const sx of [-1, 1]) {
-        const isSpeaker = i % 2 === 1;
-        const item = isSpeaker ? mkSpeaker() : mkSconce();
-        item.position.set(
-          sx * (hallW / 2 - (isSpeaker ? 0.24 : 0.13)),
-          isSpeaker ? 5.4 : 4.1,
-          pz
-        );
-        item.rotation.y = (sx * -Math.PI) / 2;
-        roomGroup.add(item);
+    const nSp = Math.max(2, Math.floor(hallD / 8));
+    for (const sx of [-1, 1]) {
+      for (let i = 0; i < nSp; i++) {
+        const sp2 = mkSpeaker();
+        const pz = zFront + 4.5 + ((i + 0.5) / nSp) * (hallD - 7);
+        sp2.position.set(sx * (hallW / 2 - 0.24), 3.6, pz);
+        sp2.rotation.y = (sx * -Math.PI) / 2;
+        roomGroup.add(sp2);
       }
     }
-    // pareja de altavoces de pantalla flanqueándola en la pared frontal
-    for (const sx of [-1, 1]) {
-      const sp = mkSpeaker();
-      sp.scale.multiplyScalar(1.35);
-      sp.position.set(sx * (hallW / 2 - 1.3), 3.3, zFront + 0.35);
-      roomGroup.add(sp);
-    }
 
-    // rótulo retroiluminado con el logo del cine en la pared trasera
+    // rótulo retroiluminado del cine en la pared trasera, con marco
+    const logoFrame = new THREE.Mesh(unitBox, mats.speakerBox);
+    logoFrame.scale.set(3.7, 3.7, 0.12);
+    logoFrame.position.set(0, 5.6, zBack - 0.06);
+    roomGroup.add(logoFrame);
     const logo = new THREE.Mesh(unitPlane, mats.logo);
     logo.scale.set(3.4, 3.4, 1);
     logo.rotation.y = Math.PI;
-    logo.position.set(0, 5.6, zBack - 0.04);
+    logo.position.set(0, 5.6, zBack - 0.14);
     roomGroup.add(logo);
 
     // el foco cenital sigue el centro del graderío al crecer la sala
@@ -896,11 +1252,60 @@ export default function CinemaConfigurator() {
     t.homeView.target.set(0, 0, zMid);
 
     recount();
-  }, [params, vipDaeReady, applySeatState, recount]);
+  }, [params, vipDaeReady, regenTick, applySeatState, recount]);
 
   // --------------------------------------------------------------------------
-  // UI
+  // Acciones de UI
   // --------------------------------------------------------------------------
+  const toggleSound = () => {
+    const t = T.current;
+    if (!t) return;
+    if (t.listener && t.listener.context.state === 'suspended') {
+      t.listener.context.resume().catch(() => {});
+    }
+    t.video.muted = !t.video.muted;
+    t.video.play().catch(() => {});
+    setMuted(t.video.muted);
+  };
+
+  const exportConfig = () => {
+    const data = {
+      app: 'ticketing3d',
+      v: 2,
+      params,
+      states: [...seatStates.current.entries()],
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sala-${params.rows}x${params.cols}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const importConfig = (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    file
+      .text()
+      .then((txt) => {
+        const data = JSON.parse(txt);
+        if (!data || data.app !== 'ticketing3d' || !data.params) {
+          throw new Error('formato');
+        }
+        seatStates.current = new Map(data.states || []);
+        setParams({ ...DEFAULT_PARAMS, ...data.params });
+        setRegenTick((k) => k + 1);
+      })
+      .catch(() => {
+        window.alert('El archivo no es una configuración de sala válida.');
+      });
+  };
+
   const setP = (k) => (e) =>
     setParams((p) => ({
       ...p,
@@ -943,9 +1348,14 @@ export default function CinemaConfigurator() {
     </button>
   );
 
+  const libres = counts.total - counts.blocked - counts.sold;
+
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
       <div ref={mountRef} style={{ position: 'absolute', inset: 0 }} />
+
+      {/* tooltip de butaca */}
+      <div ref={tipRef} style={ui.tip} />
 
       {/* aviso superior en modo POV */}
       {povUI && (
@@ -976,8 +1386,8 @@ export default function CinemaConfigurator() {
 
           <div style={ui.counters}>
             <div style={ui.counter}>
-              <div style={ui.counterNum}>{counts.total - counts.blocked}</div>
-              <div style={ui.counterLbl}>Aforo</div>
+              <div style={{ ...ui.counterNum, color: '#7ce38b' }}>{libres}</div>
+              <div style={ui.counterLbl}>Libres</div>
             </div>
             <div style={{ ...ui.counter, borderColor: 'rgba(216,35,42,.5)' }}>
               <div style={{ ...ui.counterNum, color: '#ff5a60' }}>{counts.vip}</div>
@@ -987,7 +1397,11 @@ export default function CinemaConfigurator() {
               <div style={{ ...ui.counterNum, color: '#9a95a3' }}>
                 {counts.blocked}
               </div>
-              <div style={ui.counterLbl}>Bloqueadas</div>
+              <div style={ui.counterLbl}>Bloq.</div>
+            </div>
+            <div style={ui.counter}>
+              <div style={{ ...ui.counterNum, color: '#c9a145' }}>{counts.sold}</div>
+              <div style={ui.counterLbl}>Vendidas</div>
             </div>
           </div>
 
@@ -997,6 +1411,9 @@ export default function CinemaConfigurator() {
           {slider('Curvatura', 'curvature', 0, 100, 1, '%')}
           {slider('Pendiente', 'slope', 0, 0.6, 0.01, ' m/fila')}
           {slider('Separación', 'spacing', 0.68, 1.0, 0.01, ' m')}
+          {slider('Ocupación simulada', 'occupancy', 0, 100, 1, '%')}
+          {slider('Ancho pantalla', 'screenWPct', 40, 100, 1, '%')}
+          {slider('Alto pantalla', 'screenH', 2, 8.2, 0.1, ' m')}
 
           <label style={ui.checkRow}>
             <input
@@ -1008,7 +1425,10 @@ export default function CinemaConfigurator() {
             Pasillo central
           </label>
 
-          <div style={ui.modesLbl}>Al tocar una butaca:</div>
+          <div style={ui.modesLbl}>
+            Al tocar una butaca (arrastra para pintar varias · toca el número de
+            fila para marcarla entera):
+          </div>
           <div style={ui.modes}>
             {modeBtn('vip', 'VIP', '#d8232a')}
             {modeBtn('block', 'Bloquear', '#4d4956')}
@@ -1024,6 +1444,41 @@ export default function CinemaConfigurator() {
           >
             👁 Ver desde la butaca
           </button>
+
+          <div style={ui.toolRow}>
+            <button
+              onClick={() => setHeatOn((v) => !v)}
+              style={{
+                ...ui.toolBtn,
+                background: heatOn ? '#7048e8' : 'rgba(255,255,255,.06)',
+                borderColor: heatOn ? '#7048e8' : 'rgba(255,255,255,.15)',
+                color: heatOn ? '#fff' : '#c9c6cf',
+              }}
+            >
+              🎯 Mapa de visión
+            </button>
+            <button onClick={toggleSound} style={ui.toolBtn}>
+              {muted ? '🔇 Sonido' : '🔊 Silenciar'}
+            </button>
+          </div>
+          <div style={ui.toolRow}>
+            <button onClick={exportConfig} style={ui.toolBtn}>
+              ⬇ Exportar
+            </button>
+            <button
+              onClick={() => fileRef.current && fileRef.current.click()}
+              style={ui.toolBtn}
+            >
+              ⬆ Importar
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={importConfig}
+              style={{ display: 'none' }}
+            />
+          </div>
 
           <div style={ui.help}>
             Arrastra para orbitar · rueda/pellizco para zoom · toca una butaca
@@ -1080,19 +1535,19 @@ const ui = {
   },
   counters: {
     display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    gap: 8,
+    gridTemplateColumns: '1fr 1fr 1fr 1fr',
+    gap: 6,
     marginBottom: 12,
   },
   counter: {
     border: '1px solid rgba(255,255,255,.14)',
     borderRadius: 10,
-    padding: '7px 4px',
+    padding: '7px 2px',
     textAlign: 'center',
     background: 'rgba(255,255,255,.04)',
   },
-  counterNum: { fontSize: 19, fontWeight: 700, lineHeight: 1.1 },
-  counterLbl: { fontSize: 10.5, opacity: 0.65, marginTop: 2 },
+  counterNum: { fontSize: 17, fontWeight: 700, lineHeight: 1.1 },
+  counterLbl: { fontSize: 10, opacity: 0.65, marginTop: 2 },
   row: { marginBottom: 9 },
   rowTop: {
     display: 'flex',
@@ -1109,7 +1564,7 @@ const ui = {
     margin: '4px 0 12px',
     cursor: 'pointer',
   },
-  modesLbl: { fontSize: 11.5, opacity: 0.65, marginBottom: 6 },
+  modesLbl: { fontSize: 11, opacity: 0.65, marginBottom: 6, lineHeight: 1.45 },
   modes: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr 1fr',
@@ -1134,7 +1589,23 @@ const ui = {
     cursor: 'pointer',
     fontSize: 13,
     fontWeight: 600,
-    marginBottom: 10,
+    marginBottom: 8,
+  },
+  toolRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 7,
+    marginBottom: 8,
+  },
+  toolBtn: {
+    padding: '8px 4px',
+    borderRadius: 9,
+    border: '1px solid rgba(255,255,255,.15)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#c9c6cf',
+    cursor: 'pointer',
+    fontSize: 12.5,
+    fontWeight: 600,
   },
   help: {
     fontSize: 11,
@@ -1191,5 +1662,19 @@ const ui = {
     cursor: 'pointer',
     fontFamily: 'system-ui, sans-serif',
     boxShadow: '0 8px 30px rgba(0,0,0,.5)',
+  },
+  tip: {
+    position: 'absolute',
+    display: 'none',
+    pointerEvents: 'none',
+    background: 'rgba(12,10,16,.92)',
+    border: '1px solid rgba(216,35,42,.45)',
+    borderRadius: 8,
+    padding: '5px 10px',
+    color: '#e8e6ec',
+    fontSize: 12,
+    fontFamily: 'system-ui, sans-serif',
+    whiteSpace: 'nowrap',
+    zIndex: 10,
   },
 };
