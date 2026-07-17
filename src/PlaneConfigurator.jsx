@@ -18,7 +18,7 @@ import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtil
 
 const R_FUS = 2.4;
 const YC = 1.35;
-const WIN_Y = 1.55;
+const WIN_Y = 1.18; // centro de ventanilla a la altura del hombro sentado
 const WIN_EVERY = 0.55;
 const Z_FRONT = -1.6;
 const FLY_MS = 1100;
@@ -191,9 +191,10 @@ export default function PlaneConfigurator({ onExit }) {
     wctx.fillStyle = '#000';
     wctx.shadowColor = '#000';
     wctx.shadowBlur = 6;
-    for (const cx of [270, 754]) {
+    // óvalos a la altura de WIN_Y y con tamaño realista (~0,48 × 0,30 m)
+    for (const cx of [244, 780]) {
       wctx.beginPath();
-      wctx.ellipse(cx, 256, 12, 100, 0, 0, Math.PI * 2);
+      wctx.ellipse(cx, 256, 16, 140, 0, 0, Math.PI * 2);
       wctx.fill();
       wctx.fill();
     }
@@ -491,7 +492,7 @@ export default function PlaneConfigurator({ onExit }) {
       const u = seatGroup.userData;
       const tgt =
         u.kind === 'ventanilla'
-          ? new THREE.Vector3(Math.sign(p.x) * 9, WIN_Y - 0.9, p.z - 0.6)
+          ? new THREE.Vector3(Math.sign(p.x) * 9, WIN_Y - 0.45, p.z - 0.6)
           : new THREE.Vector3(p.x * 0.3, 1.3, p.z - 8);
       flyTo(eye, tgt, () => {
         t.pov.active = true;
@@ -1056,7 +1057,7 @@ export default function PlaneConfigurator({ onExit }) {
 
     for (const sx of [-1, 1]) {
       const strip = new THREE.Mesh(unitPlane, mats.glass);
-      strip.scale.set(len, 0.55, 1);
+      strip.scale.set(len, 0.72, 1);
       strip.rotation.y = (sx * -Math.PI) / 2;
       strip.rotation.z = sx * -0.09;
       strip.position.set(sx * (R_FUS - 0.06), WIN_Y, Z_FRONT + len / 2);
