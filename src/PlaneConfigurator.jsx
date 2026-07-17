@@ -225,6 +225,30 @@ export default function PlaneConfigurator({ onExit }) {
     const exitTex = new THREE.CanvasTexture(exitCv);
     exitTex.encoding = THREE.sRGBEncoding;
 
+    // oclusión ambiental fake: mancha radial para sombras de contacto bajo
+    // los asientos y degradado vertical para la junta suelo-pared
+    const aoCv = document.createElement('canvas');
+    aoCv.width = aoCv.height = 128;
+    const actx = aoCv.getContext('2d');
+    const ag = actx.createRadialGradient(64, 64, 6, 64, 64, 62);
+    ag.addColorStop(0, 'rgba(0,0,0,0.5)');
+    ag.addColorStop(0.55, 'rgba(0,0,0,0.28)');
+    ag.addColorStop(1, 'rgba(0,0,0,0)');
+    actx.fillStyle = ag;
+    actx.fillRect(0, 0, 128, 128);
+    const aoTex = new THREE.CanvasTexture(aoCv);
+
+    const aoWallCv = document.createElement('canvas');
+    aoWallCv.width = 8;
+    aoWallCv.height = 64;
+    const awctx = aoWallCv.getContext('2d');
+    const wg = awctx.createLinearGradient(0, 64, 0, 0);
+    wg.addColorStop(0, 'rgba(0,0,0,0.34)'); // abajo (junta con el suelo)
+    wg.addColorStop(1, 'rgba(0,0,0,0)');
+    awctx.fillStyle = wg;
+    awctx.fillRect(0, 0, 8, 64);
+    const aoWallTex = new THREE.CanvasTexture(aoWallCv);
+
     // ---- materiales -----------------------------------------------------------
     const mkStd = (opts) => new THREE.MeshStandardMaterial(opts);
     const mats = {
@@ -256,6 +280,13 @@ export default function PlaneConfigurator({ onExit }) {
         mkStd({ color: 0xd9480f, emissive: 0xd9480f, emissiveIntensity: 0.3, roughness: 0.85 }),
       ],
       cloud: new THREE.SpriteMaterial({ map: cloudTex, opacity: 0.9, depthWrite: false }),
+      armrest: mkStd({ color: 0x646b78, roughness: 0.85 }),
+      aoBlob: new THREE.MeshBasicMaterial({
+        map: aoTex, transparent: true, depthWrite: false,
+      }),
+      aoWall: new THREE.MeshBasicMaterial({
+        map: aoWallTex, transparent: true, depthWrite: false,
+      }),
       // reposacabezas de color por zona tarifaria (como las fundas reales)
       zone: {
         one: mkStd({ color: 0xf2d21f, roughness: 0.85 }),
@@ -344,14 +375,29 @@ export default function PlaneConfigurator({ onExit }) {
       cover.scale.set(w * 0.94, 0.26, 0.115);
       cover.name = 'hr';
       tilt.add(cover);
-      for (const s of [-1, 1]) {
-        add(unitBox, mats.seat, s * (w / 2 + 0.03), 0.44, 0.06, 0.06, 0.05, 0.4, 'swap');
-      }
+      // sin reposabrazos propios: en un avión se COMPARTEN entre asientos y se
+      // generan aparte por fila (uno entre cada par + los dos extremos)
       return bakeTemplate(g);
     };
 
+    // plantillas para geometría fusionada por cabina: reposabrazos compartidos
+    // y manchas de oclusión bajo cada asiento
+    const armTpl = (() => {
+      const pad = new THREE.BoxGeometry(0.07, 0.045, 0.42);
+      pad.translate(0, 0.46, 0.04);
+      const sup = new THREE.BoxGeometry(0.05, 0.16, 0.05);
+      sup.translate(0, 0.37, 0.2);
+      const merged = BufferGeometryUtils.mergeBufferGeometries([pad, sup], false);
+      pad.dispose();
+      sup.dispose();
+      return merged;
+    })();
+    const blobTpl = new THREE.PlaneGeometry(0.66, 0.62);
+    blobTpl.rotateX(-Math.PI / 2);
+
     T.current = {
       renderer, scene, camera, mats, unitBox, unitPlane, sun, clouds, winAlpha,
+      armTpl, blobTpl,
       seatTemplate: buildSeat(),
       seatsGroup: null, cabinGroup: null,
       seatList: [],
@@ -901,7 +947,11 @@ export default function PlaneConfigurator({ onExit }) {
       return 'regular';
     };
 
+    const mkGeo = (g) => { t.disposables.push(g); return g; };
+
     // ---- filas ----------------------------------------------------------------
+    const armGeos = [];
+    const blobGeos = [];
     let z = 0;
     for (let r = 0; r < model.rows; r++) {
       const num = displayNum(r);
@@ -937,6 +987,25 @@ export default function PlaneConfigurator({ onExit }) {
           zone, exit: isExit, px, pz: zRow, score: 0, heat: 0,
         });
         if (hash01(key) < occupancy / 100) t.occupiedSet.add(key);
+        // mancha de oclusión bajo el asiento
+        const blob = t.blobTpl.clone();
+        blob.translate(px, 0.012, zRow + 0.03);
+        blobGeos.push(blob);
+      }
+      // reposabrazos COMPARTIDOS: uno entre cada par de asientos del bloque
+      // más los dos extremos (como en un avión real)
+      const leftXs = idxs.filter((i) => i < 3).map((i) => SEAT_X[i]);
+      const rightXs = idxs.filter((i) => i >= 3).map((i) => SEAT_X[i]);
+      for (const xs of [leftXs, rightXs]) {
+        if (!xs.length) continue;
+        const arms = [xs[0] - 0.27];
+        for (let k = 0; k < xs.length - 1; k++) arms.push((xs[k] + xs[k + 1]) / 2);
+        arms.push(xs[xs.length - 1] + 0.27);
+        for (const ax of arms) {
+          const g = t.armTpl.clone();
+          g.translate(ax, 0, zRow);
+          armGeos.push(g);
+        }
       }
     }
     const zEnd = z + 0.9;
@@ -965,9 +1034,19 @@ export default function PlaneConfigurator({ onExit }) {
     seatsGroup.updateMatrixWorld(true);
     seatsGroup.traverse((o) => (o.matrixAutoUpdate = false));
 
-    // ---- cabina ---------------------------------------------------------------
-    const mkGeo = (g) => { t.disposables.push(g); return g; };
+    // fusionar reposabrazos y manchas AO en un mesh cada uno (2 draw calls)
+    if (armGeos.length) {
+      const merged = mkGeo(BufferGeometryUtils.mergeBufferGeometries(armGeos, false));
+      armGeos.forEach((g) => g.dispose());
+      cabinGroup.add(new THREE.Mesh(merged, mats.armrest));
+    }
+    if (blobGeos.length) {
+      const merged = mkGeo(BufferGeometryUtils.mergeBufferGeometries(blobGeos, false));
+      blobGeos.forEach((g) => g.dispose());
+      cabinGroup.add(new THREE.Mesh(merged, mats.aoBlob));
+    }
 
+    // ---- cabina ---------------------------------------------------------------
     const fusGeo = mkGeo(new THREE.CylinderGeometry(R_FUS, R_FUS, len, 48, 1, true));
     fusGeo.rotateX(Math.PI / 2);
     t.winAlpha.repeat.set(1, len / WIN_EVERY);
@@ -992,6 +1071,15 @@ export default function PlaneConfigurator({ onExit }) {
     aisle.scale.set(0.56, 0.02, len);
     aisle.position.set(0, 0.012, Z_FRONT + len / 2);
     cabinGroup.add(aisle);
+
+    // oclusión en la junta suelo-pared (degradado oscuro que sube por la pared)
+    for (const sx of [-1, 1]) {
+      const ao = new THREE.Mesh(unitPlane, mats.aoWall);
+      ao.scale.set(len, 0.55, 1);
+      ao.rotation.y = (sx * -Math.PI) / 2;
+      ao.position.set(sx * 2.3, 0.28, Z_FRONT + len / 2);
+      cabinGroup.add(ao);
+    }
 
     for (const sx of [-1, 1]) {
       // maletero: panel horizontal mirando hacia abajo (visible desde dentro,
