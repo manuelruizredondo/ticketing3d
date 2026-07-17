@@ -994,11 +994,12 @@ export default function PlaneConfigurator({ onExit }) {
     cabinGroup.add(aisle);
 
     for (const sx of [-1, 1]) {
+      // maletero: panel horizontal mirando hacia abajo (visible desde dentro,
+      // invisible en la vista cenital para no tapar el plano de asientos)
       const bin = new THREE.Mesh(unitPlane, mats.bin);
-      bin.scale.set(0.9, len, 1);
-      bin.position.set(sx * 1.28, 2.12, Z_FRONT + len / 2);
-      bin.rotation.z = (sx * Math.PI) / 2;
-      bin.lookAt(0, 0.9, Z_FRONT + len / 2);
+      bin.scale.set(0.85, len, 1);
+      bin.rotation.x = Math.PI / 2; // horizontal, boca abajo, largo según Z
+      bin.position.set(sx * 1.25, 2.08, Z_FRONT + len / 2);
       cabinGroup.add(bin);
       const strip = new THREE.Mesh(unitBox, mats.lightStrip);
       strip.scale.set(0.06, 0.03, len - 1);
@@ -1042,8 +1043,8 @@ export default function PlaneConfigurator({ onExit }) {
     for (const sx of [-1, 1]) {
       const wing = new THREE.Mesh(wingGeo, mats.wing);
       wing.scale.x = sx;
-      // la raíz queda pegada a la pared interior para no asomar por el suelo
-      wing.position.set(sx * 1.95, 0.85, wingC);
+      // la raíz arranca justo en la pared del fuselaje: nada asoma dentro
+      wing.position.set(sx * 2.35, 0.75, wingC);
       wing.rotation.z = sx * 0.05; // diedro sutil hacia arriba
       cabinGroup.add(wing);
       // motor colgado bajo el ala, con pilón y entrada oscura
