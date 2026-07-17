@@ -205,7 +205,7 @@ const icons = {
   ),
 };
 
-export default function CinemaConfigurator() {
+export default function CinemaConfigurator({ onExit }) {
   const mountRef = useRef(null);
   const tipRef = useRef(null);
   const markerLabelRef = useRef(null);
@@ -2113,6 +2113,13 @@ export default function CinemaConfigurator() {
         </button>
       )}
 
+      {/* salir al menú principal (arriba izquierda) */}
+      {!povUI && onExit && (
+        <button style={ui.exitBtn} title="Menú principal" onClick={onExit}>
+          <Ic size={18}>{icons.back}</Ic>
+        </button>
+      )}
+
       {/* vista top / posición original (abajo izquierda) */}
       {!povUI && (
         <button
@@ -2626,6 +2633,24 @@ const ui = {
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.55)',
     transition: 'opacity .25s',
+  },
+  exitBtn: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    width: 44,
+    height: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,.16)',
+    background: 'rgba(16,14,20,.74)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
+    color: '#e8e6ec',
+    cursor: 'pointer',
+    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
   },
   homeBtn: {
     position: 'absolute',
