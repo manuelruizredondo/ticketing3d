@@ -330,16 +330,19 @@ export default function PlaneConfigurator({ onExit }) {
       tilt.position.set(0, 0.32, 0.2);
       tilt.rotation.x = 0.14;
       g.add(tilt);
+      // respaldo de UNA pieza, alto y con el reposacabezas integrado
       const back = new THREE.Mesh(unitBox, mats.seat);
-      back.position.set(0, 0.36, 0);
-      back.scale.set(w, 0.72, 0.09);
+      back.position.set(0, 0.46, 0);
+      back.scale.set(w, 0.92, 0.075);
       back.name = 'swap';
       tilt.add(back);
-      const head = new THREE.Mesh(unitBox, mats.zone.regular);
-      head.position.set(0, 0.78, -0.005);
-      head.scale.set(w * 0.62, 0.16, 0.08);
-      head.name = 'hr';
-      tilt.add(head);
+      // funda de zona tarifaria: envuelve la parte alta del respaldo (se ve
+      // de frente y también desde arriba en el plano de asientos)
+      const cover = new THREE.Mesh(unitBox, mats.zone.regular);
+      cover.position.set(0, 0.81, 0);
+      cover.scale.set(w * 0.94, 0.26, 0.115);
+      cover.name = 'hr';
+      tilt.add(cover);
       for (const s of [-1, 1]) {
         add(unitBox, mats.seat, s * (w / 2 + 0.03), 0.44, 0.06, 0.06, 0.05, 0.4, 'swap');
       }
@@ -435,7 +438,7 @@ export default function PlaneConfigurator({ onExit }) {
     const enterPovAt = (seatGroup) => {
       const t = T.current;
       const p = seatGroup.getWorldPosition(new THREE.Vector3());
-      const eye = new THREE.Vector3(p.x * 0.82, p.y + 1.08, p.z + 0.05);
+      const eye = new THREE.Vector3(p.x * 0.82, p.y + 1.14, p.z + 0.05);
       setPanelOpen(false);
       hideTip();
       const u = seatGroup.userData;
