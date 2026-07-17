@@ -3,20 +3,54 @@ import * as THREE from 'three';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ============================================================================
-// Configurador 3D de cabina de avión (narrowbody tipo A320)
-// Mismo motor que la sala de cine: Three.js r128 puro, órbita manual, POV
-// desde el asiento, pintado por arrastre, best-available y minimapa.
-// El fuselaje se renderiza por dentro (BackSide) con ventanillas recortadas
-// por alphaMap: desde el POV se ve el cielo, las nubes y EL ALA — el dato que
-// ninguna aerolínea te enseña al cobrarte la selección de asiento.
+// Configurador 3D de cabina — modelo low-cost al estilo Vueling
+// Flota A319 / A320 / A321 con zonas tarifarias reales:
+//   · Space One   (fila 1, +espacio, embarque prioritario)
+//   · Space Plus  (filas 2-4)
+//   · Space       (filas de salida de emergencia, +espacio)
+//   · Delanteros y traseros (más baratos)
+//   · Regular     (incluido en la tarifa)
+// Detalles reales: sin fila 13, fila 1 solo en el lado izquierdo (A319/A320),
+// salidas overwing por modelo, reposacabezas de color por zona.
+// El fuselaje se ve por dentro con ventanillas recortadas: desde el POV se ve
+// el cielo, las nubes y el ala — lo que compras de verdad al elegir asiento.
 // ============================================================================
 
-const R_FUS = 2.4; // radio del fuselaje
-const YC = 1.35; // altura del eje del fuselaje sobre el suelo de cabina
-const WIN_Y = 1.55; // altura de las ventanillas
-const WIN_EVERY = 0.55; // paso de ventanillas a lo largo del fuselaje
-const Z_FRONT = -1.6; // mamparo delantero
+const R_FUS = 2.4;
+const YC = 1.35;
+const WIN_Y = 1.55;
+const WIN_EVERY = 0.55;
+const Z_FRONT = -1.6;
 const FLY_MS = 1100;
+
+const SEAT_X = [-1.55, -1.05, -0.55, 0.55, 1.05, 1.55];
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+const seatKind = (x) =>
+  Math.abs(x) > 1.3 ? 'ventanilla' : Math.abs(x) < 0.8 ? 'pasillo' : 'centro';
+
+// filas físicas y salidas overwing (en numeración mostrada, que salta el 13)
+const AIRCRAFT = {
+  a319: { label: 'A319', rows: 18, exits: [8], row1LeftOnly: true },
+  a320: { label: 'A320', rows: 24, exits: [10, 11], row1LeftOnly: true },
+  a321: { label: 'A321', rows: 30, exits: [12, 14], row1LeftOnly: false },
+};
+// numeración mostrada: como en los aviones reales, la fila 13 no existe
+const displayNum = (i) => (i + 1 >= 13 ? i + 2 : i + 1);
+
+const ZONE_LABELS = {
+  one: 'Space One',
+  plus: 'Space Plus',
+  space: 'Space · salida',
+  front: 'Delantero/trasero',
+  regular: 'Regular',
+};
+const ZONE_COLORS = {
+  one: '#f2d21f',
+  plus: '#17b8ae',
+  space: '#8b2fc9',
+  front: '#cfc7b8',
+  regular: '#8d94a1',
+};
 
 const easeInOutCubic = (t) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -30,25 +64,10 @@ const hash01 = (str) => {
   return (h >>> 8) / 16777216;
 };
 
-// disposición: business 2-2, turista 3-3
-const BIZ_X = [-1.42, -0.74, 0.74, 1.42];
-const BIZ_LETTERS = ['A', 'C', 'D', 'F'];
-const ECO_X = [-1.55, -1.05, -0.55, 0.55, 1.05, 1.55];
-const ECO_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
-const seatKind = (x) =>
-  Math.abs(x) > 1.3 ? 'ventanilla' : Math.abs(x) < 0.8 ? 'pasillo' : 'centro';
+const DEFAULT_PARAMS = { aircraft: 'a320', pitch: 0.78, occupancy: 0 };
+const DEFAULT_PRICES = { one: 30, plus: 20, space: 15, front: 8 };
 
-const DEFAULT_PARAMS = {
-  bizRows: 2,
-  ecoRows: 26,
-  ecoPitch: 0.79, // m
-  exitRows: 1, // nº de filas de salida de emergencia
-  occupancy: 0, // % vendido simulado
-};
-const DEFAULT_PRICES = { eco: 45, biz: 120, exit: 18 };
-const BIZ_PITCH = 1.06;
-
-// iconos outline (trazo, sin relleno)
+// iconos outline
 const Ic = ({ children, size = 15, style }) => (
   <svg
     width={size}
@@ -85,9 +104,7 @@ const icons = {
     </>
   ),
   wing: (
-    <>
-      <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
-    </>
+    <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
   ),
   home: (
     <>
@@ -115,19 +132,22 @@ export default function PlaneConfigurator({ onExit }) {
   const markerLabelRef = useRef(null);
   const minimapRef = useRef(null);
   const T = useRef(null);
-  const seatStates = useRef(new Map()); // "fila-idx" -> 'sel' | 'blocked'
+  const seatStates = useRef(new Map());
   const modeRef = useRef('sel');
   const wingViewRef = useRef(false);
 
   const [params, setParams] = useState(DEFAULT_PARAMS);
   const [prices, setPrices] = useState(DEFAULT_PRICES);
-  const [mode, setMode] = useState('sel'); // 'sel' | 'block' | 'clear' | 'pov'
+  const [mode, setMode] = useState('sel');
   const [panelOpen, setPanelOpen] = useState(true);
   const [povUI, setPovUI] = useState(false);
   const [wingView, setWingView] = useState(false);
-  const [counts, setCounts] = useState({ total: 0, sel: 0, blocked: 0, sold: 0, soldBiz: 0, soldExit: 0 });
+  const [counts, setCounts] = useState({
+    total: 0, sel: 0, blocked: 0, sold: 0,
+    soldZ: {}, totZ: {},
+  });
   const [buyN, setBuyN] = useState(2);
-  const [buyClass, setBuyClass] = useState('eco');
+  const [buyPref, setBuyPref] = useState('best'); // 'best' | 'cheap'
   const [proposal, setProposal] = useState(null);
   const [isNarrow, setIsNarrow] = useState(false);
 
@@ -148,17 +168,13 @@ export default function PlaneConfigurator({ onExit }) {
     renderer.domElement.style.touchAction = 'none';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x9ec7ea); // cielo de crucero
+    scene.background = new THREE.Color(0x9ec7ea);
     scene.fog = new THREE.Fog(0xbcd9f0, 60, 220);
 
     const camera = new THREE.PerspectiveCamera(
-      55,
-      mount.clientWidth / mount.clientHeight,
-      0.1,
-      400
+      55, mount.clientWidth / mount.clientHeight, 0.1, 400
     );
 
-    // luz de día: hemisferio cielo/suelo + sol
     scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x9a917f, 0.95));
     const sun = new THREE.DirectionalLight(0xfff2dd, 0.75);
     sun.position.set(30, 40, 10);
@@ -166,14 +182,12 @@ export default function PlaneConfigurator({ onExit }) {
     scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
     // ---- texturas procedurales ------------------------------------------------
-    // recorte de ventanillas en el fuselaje (blanco opaco, óvalos transparentes)
     const winCv = document.createElement('canvas');
     winCv.width = 1024;
     winCv.height = 512;
     const wctx = winCv.getContext('2d');
     wctx.fillStyle = '#fff';
     wctx.fillRect(0, 0, 1024, 512);
-    // óvalos con borde emplumado para que el alphaTest corte una curva limpia
     wctx.fillStyle = '#000';
     wctx.shadowColor = '#000';
     wctx.shadowBlur = 6;
@@ -186,7 +200,6 @@ export default function PlaneConfigurator({ onExit }) {
     const winAlpha = new THREE.CanvasTexture(winCv);
     winAlpha.wrapS = winAlpha.wrapT = THREE.RepeatWrapping;
 
-    // nube blanda para sprites
     const cloudCv = document.createElement('canvas');
     cloudCv.width = cloudCv.height = 128;
     const cctx = cloudCv.getContext('2d');
@@ -198,7 +211,6 @@ export default function PlaneConfigurator({ onExit }) {
     cctx.fillRect(0, 0, 128, 128);
     const cloudTex = new THREE.CanvasTexture(cloudCv);
 
-    // rótulo EXIT
     const exitCv = document.createElement('canvas');
     exitCv.width = 128;
     exitCv.height = 48;
@@ -214,52 +226,49 @@ export default function PlaneConfigurator({ onExit }) {
     exitTex.encoding = THREE.sRGBEncoding;
 
     // ---- materiales -----------------------------------------------------------
+    const mkStd = (opts) => new THREE.MeshStandardMaterial(opts);
     const mats = {
-      liner: new THREE.MeshStandardMaterial({
-        color: 0xe4e8ee,
-        roughness: 0.92,
-        side: THREE.BackSide,
-        alphaMap: winAlpha,
-        alphaTest: 0.5,
+      liner: mkStd({
+        color: 0xe4e8ee, roughness: 0.92, side: THREE.BackSide,
+        alphaMap: winAlpha, alphaTest: 0.5,
       }),
       glass: new THREE.MeshBasicMaterial({
-        color: 0xcfe6fa,
-        transparent: true,
-        opacity: 0.16,
-        depthWrite: false,
+        color: 0xcfe6fa, transparent: true, opacity: 0.16, depthWrite: false,
       }),
-      floor: new THREE.MeshStandardMaterial({ color: 0x3c4657, roughness: 0.95 }),
-      aisle: new THREE.MeshStandardMaterial({ color: 0x2b3342, roughness: 0.95 }),
-      bin: new THREE.MeshStandardMaterial({ color: 0xdadfe6, roughness: 0.85 }),
-      bulkhead: new THREE.MeshStandardMaterial({ color: 0xd6dbe2, roughness: 0.9 }),
-      lightStrip: new THREE.MeshStandardMaterial({
-        color: 0xf5f2ea,
-        emissive: 0xfff3df,
-        emissiveIntensity: 0.9,
-      }),
-      seatEco: new THREE.MeshStandardMaterial({ color: 0x3f5170, roughness: 0.9 }),
-      seatBiz: new THREE.MeshStandardMaterial({ color: 0x2c3140, roughness: 0.75 }),
-      headrest: new THREE.MeshStandardMaterial({ color: 0xe8e4da, roughness: 0.9 }),
-      metal: new THREE.MeshStandardMaterial({ color: 0x9aa0a8, metalness: 0.8, roughness: 0.4 }),
-      selMark: new THREE.MeshStandardMaterial({ color: 0x1f9d55, emissive: 0x2f9e44, emissiveIntensity: 0.25, roughness: 0.85 }),
-      blocked: new THREE.MeshStandardMaterial({ color: 0x8b919c, roughness: 0.95 }),
-      sold: new THREE.MeshStandardMaterial({ color: 0x23262e, roughness: 0.95 }),
-      proposal: new THREE.MeshStandardMaterial({ color: 0x1f9d55, emissive: 0x34d399, emissiveIntensity: 0.5, roughness: 0.8 }),
-      wing: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.55, roughness: 0.35 }),
-      engine: new THREE.MeshStandardMaterial({ color: 0xb8bec7, metalness: 0.6, roughness: 0.35 }),
+      floor: mkStd({ color: 0x3c4657, roughness: 0.95 }),
+      aisle: mkStd({ color: 0x2b3342, roughness: 0.95 }),
+      bin: mkStd({ color: 0xdadfe6, roughness: 0.85 }),
+      bulkhead: mkStd({ color: 0xd6dbe2, roughness: 0.9 }),
+      lightStrip: mkStd({ color: 0xf5f2ea, emissive: 0xfff3df, emissiveIntensity: 0.9 }),
+      seat: mkStd({ color: 0x3a4356, roughness: 0.9 }), // tapizado gris oscuro
+      metal: mkStd({ color: 0x9aa0a8, metalness: 0.8, roughness: 0.4 }),
+      selMark: mkStd({ color: 0x1f9d55, emissive: 0x2f9e44, emissiveIntensity: 0.25, roughness: 0.85 }),
+      blocked: mkStd({ color: 0x8b919c, roughness: 0.95 }),
+      sold: mkStd({ color: 0x23262e, roughness: 0.95 }),
+      proposal: mkStd({ color: 0x1f9d55, emissive: 0x34d399, emissiveIntensity: 0.5, roughness: 0.8 }),
+      wing: mkStd({ color: 0xc9ced6, metalness: 0.55, roughness: 0.35 }),
+      engine: mkStd({ color: 0xb8bec7, metalness: 0.6, roughness: 0.35 }),
       exit: new THREE.MeshBasicMaterial({ map: exitTex, toneMapped: false }),
       heat: [
-        new THREE.MeshStandardMaterial({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.3, roughness: 0.85 }),
-        new THREE.MeshStandardMaterial({ color: 0xe8a013, emissive: 0xe8a013, emissiveIntensity: 0.3, roughness: 0.85 }),
-        new THREE.MeshStandardMaterial({ color: 0xd9480f, emissive: 0xd9480f, emissiveIntensity: 0.3, roughness: 0.85 }),
+        mkStd({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.3, roughness: 0.85 }),
+        mkStd({ color: 0xe8a013, emissive: 0xe8a013, emissiveIntensity: 0.3, roughness: 0.85 }),
+        mkStd({ color: 0xd9480f, emissive: 0xd9480f, emissiveIntensity: 0.3, roughness: 0.85 }),
       ],
       cloud: new THREE.SpriteMaterial({ map: cloudTex, opacity: 0.9, depthWrite: false }),
+      // reposacabezas de color por zona tarifaria (como las fundas reales)
+      zone: {
+        one: mkStd({ color: 0xf2d21f, roughness: 0.85 }),
+        plus: mkStd({ color: 0x17b8ae, roughness: 0.85 }),
+        space: mkStd({ color: 0x8b2fc9, roughness: 0.85 }),
+        front: mkStd({ color: 0xcfc7b8, roughness: 0.9 }),
+        regular: mkStd({ color: 0xe8e4da, roughness: 0.9 }),
+      },
     };
 
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitPlane = new THREE.PlaneGeometry(1, 1);
 
-    // ---- nubes exteriores (paralaje al mirar por la ventanilla) --------------
+    // nubes exteriores
     const clouds = [];
     for (let i = 0; i < 22; i++) {
       const s = new THREE.Sprite(mats.cloud);
@@ -267,26 +276,26 @@ export default function PlaneConfigurator({ onExit }) {
       const h2 = hash01(`cloudb${i}`);
       const h3 = hash01(`cloudc${i}`);
       const side = i % 2 === 0 ? 1 : -1;
-      s.position.set(
-        side * (14 + h * 60),
-        -6 + h2 * 10,
-        -30 + h3 * 90
-      );
+      s.position.set(side * (14 + h * 60), -6 + h2 * 10, -30 + h3 * 90);
       const sc = 7 + h * 12;
       s.scale.set(sc, sc * 0.42, 1);
       scene.add(s);
       clouds.push(s);
     }
 
-    // ---- plantillas de asiento (fusionadas) -----------------------------------
+    // ---- plantilla de asiento --------------------------------------------------
+    // bake que conserva los meshes con nombre ('swap' = tapizado que cambia de
+    // estado, 'hr' = reposacabezas que toma el color de la zona tarifaria)
     const bakeTemplate = (group) => {
       group.updateMatrixWorld(true);
       const buckets = new Map();
       group.traverse((m) => {
         if (!m.isMesh) return;
-        const swap = m.name === 'swap';
-        const key = swap ? 'swap' : m.material.uuid;
-        if (!buckets.has(key)) buckets.set(key, { mat: m.material, swap, geos: [] });
+        const named = m.name === 'swap' || m.name === 'hr';
+        const key = named ? m.name : m.material.uuid;
+        if (!buckets.has(key)) {
+          buckets.set(key, { mat: m.material, name: named ? m.name : '', geos: [] });
+        }
         const g = m.geometry.clone();
         g.applyMatrix4(m.matrixWorld);
         buckets.get(key).geos.push(g);
@@ -296,53 +305,52 @@ export default function PlaneConfigurator({ onExit }) {
         const merged = BufferGeometryUtils.mergeBufferGeometries(b.geos, false);
         b.geos.forEach((g) => g.dispose());
         const mesh = new THREE.Mesh(merged, b.mat);
-        if (b.swap) mesh.name = 'swap';
+        mesh.name = b.name;
         out.add(mesh);
       }
       return out;
     };
 
-    const buildSeat = (w, fabric, reclined) => {
+    const buildSeat = () => {
+      const w = 0.48;
       const g = new THREE.Group();
-      const add = (geo, mat, x, y, z, sx, sy, sz, swap = false) => {
+      const add = (geo, mat, x, y, z, sx, sy, sz, name = '') => {
         const m = new THREE.Mesh(geo, mat);
         m.position.set(x, y, z);
         m.scale.set(sx, sy, sz);
-        if (swap) m.name = 'swap';
+        m.name = name;
         g.add(m);
         return m;
       };
-      // patas + cojín + respaldo con reposacabezas claro
       add(unitBox, mats.metal, 0, 0.16, 0, w * 0.8, 0.06, 0.42);
       add(unitBox, mats.metal, -w * 0.38, 0.08, 0.1, 0.05, 0.16, 0.05);
       add(unitBox, mats.metal, w * 0.38, 0.08, 0.1, 0.05, 0.16, 0.05);
-      add(unitBox, fabric, 0, 0.34, 0, w, 0.13, 0.46, true);
+      add(unitBox, mats.seat, 0, 0.34, 0, w, 0.13, 0.46, 'swap');
       const tilt = new THREE.Group();
       tilt.position.set(0, 0.32, 0.2);
-      tilt.rotation.x = reclined ? 0.24 : 0.14;
+      tilt.rotation.x = 0.14;
       g.add(tilt);
-      const back = new THREE.Mesh(unitBox, fabric);
+      const back = new THREE.Mesh(unitBox, mats.seat);
       back.position.set(0, 0.36, 0);
       back.scale.set(w, 0.72, 0.09);
       back.name = 'swap';
       tilt.add(back);
-      const head = new THREE.Mesh(unitBox, mats.headrest);
+      const head = new THREE.Mesh(unitBox, mats.zone.regular);
       head.position.set(0, 0.78, -0.005);
       head.scale.set(w * 0.62, 0.16, 0.08);
+      head.name = 'hr';
       tilt.add(head);
-      // reposabrazos
       for (const s of [-1, 1]) {
-        add(unitBox, fabric, s * (w / 2 + 0.03), 0.44, 0.06, 0.06, 0.05, 0.4, true);
+        add(unitBox, mats.seat, s * (w / 2 + 0.03), 0.44, 0.06, 0.06, 0.05, 0.4, 'swap');
       }
       return bakeTemplate(g);
     };
 
     T.current = {
       renderer, scene, camera, mats, unitBox, unitPlane, sun, clouds, winAlpha,
-      ecoTemplate: buildSeat(0.48, mats.seatEco, false),
-      bizTemplate: buildSeat(0.6, mats.seatBiz, true),
+      seatTemplate: buildSeat(),
       seatsGroup: null, cabinGroup: null,
-      seatList: [], // {key,row,idx,letter,kind,biz,exit,px,pz,score,heat}
+      seatList: [],
       seatByKey: new Map(),
       rowMeta: new Map(),
       occupiedSet: new Set(),
@@ -350,7 +358,7 @@ export default function PlaneConfigurator({ onExit }) {
       proposal: new Set(),
       disposables: [],
       cabin: { len: 24, zEnd: 22 },
-      wingZ: { c: 9, half: 2.3 },
+      wingZ: { c: 9, half: 2.4 },
       orbit: { theta: 0, phi: 0.16, radius: 26, target: new THREE.Vector3(0, 0.6, 10) },
       homeView: { theta: 0, phi: 0.16, radius: 26, target: new THREE.Vector3(0, 0.6, 10) },
       pov: { active: false, eye: new THREE.Vector3(), yaw: Math.PI, pitch: 0 },
@@ -372,9 +380,7 @@ export default function PlaneConfigurator({ onExit }) {
 
     // baliza de asiento propuesto
     const markerMat = new THREE.MeshStandardMaterial({
-      color: 0x1f9d55,
-      emissive: 0x34d399,
-      emissiveIntensity: 1.1,
+      color: 0x1f9d55, emissive: 0x34d399, emissiveIntensity: 1.1,
     });
     const markerGrp = new THREE.Group();
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 14), markerMat);
@@ -429,12 +435,9 @@ export default function PlaneConfigurator({ onExit }) {
     const enterPovAt = (seatGroup) => {
       const t = T.current;
       const p = seatGroup.getWorldPosition(new THREE.Vector3());
-      // el ojo un poco hacia el pasillo para encuadrar la ventanilla
       const eye = new THREE.Vector3(p.x * 0.82, p.y + 1.08, p.z + 0.05);
       setPanelOpen(false);
       hideTip();
-      // objetivo inicial: por la ventanilla mirando ligeramente abajo (ahí
-      // está el ala si toca); en asientos interiores, hacia el frente
       const u = seatGroup.userData;
       const tgt =
         u.kind === 'ventanilla'
@@ -535,13 +538,11 @@ export default function PlaneConfigurator({ onExit }) {
         if (res && res.seat) {
           const u = res.seat.userData;
           const st = seatStates.current.get(u.key);
-          let extra = '';
-          if (st === 'blocked') extra = ' · Bloqueado';
-          else if (t.soldSet.has(u.key) || t.occupiedSet.has(u.key)) extra = ' · Vendido';
-          else if (st === 'sel') extra = ' · Seleccionado';
-          if (u.biz) extra += ' · Business';
-          if (u.exit) extra += ' · Salida emergencia';
-          showTip(e.clientX, e.clientY, `${u.row + 1}${u.letter} · ${u.kind}${extra}`);
+          let extra = ` · ${ZONE_LABELS[u.zone]}`;
+          if (st === 'blocked') extra += ' · Bloqueado';
+          else if (t.soldSet.has(u.key) || t.occupiedSet.has(u.key)) extra += ' · Vendido';
+          else if (st === 'sel') extra += ' · Seleccionado';
+          showTip(e.clientX, e.clientY, `${u.num}${u.letter} · ${u.kind}${extra}`);
         } else hideTip();
         return;
       }
@@ -631,7 +632,6 @@ export default function PlaneConfigurator({ onExit }) {
       const t = T.current;
       const now = performance.now();
 
-      // deriva de nubes: el avión "avanza"
       for (const c of clouds) {
         c.position.z += 0.028;
         if (c.position.z > t.cabin.zEnd + 60) c.position.z -= 150;
@@ -665,7 +665,6 @@ export default function PlaneConfigurator({ onExit }) {
         camera.lookAt(t.orbit.target);
       }
 
-      // baliza cíclica de asientos propuestos
       const mk = t.markerKeys;
       const lbl = markerLabelRef.current;
       if (mk.length && t.seatByKey.size) {
@@ -685,7 +684,7 @@ export default function PlaneConfigurator({ onExit }) {
             markerPos.project(camera);
             if (markerPos.z < 1) {
               const u = seat.userData;
-              lbl.textContent = `${u.row + 1}${u.letter} · ${u.kind}  (${(t.markerIdx % mk.length) + 1}/${mk.length})`;
+              lbl.textContent = `${u.num}${u.letter} · ${u.kind}  (${(t.markerIdx % mk.length) + 1}/${mk.length})`;
               lbl.style.display = 'block';
               lbl.style.left = `${(markerPos.x * 0.5 + 0.5) * mount.clientWidth}px`;
               lbl.style.top = `${(-markerPos.y * 0.5 + 0.5) * mount.clientHeight}px`;
@@ -719,8 +718,7 @@ export default function PlaneConfigurator({ onExit }) {
   }, []);
 
   // --------------------------------------------------------------------------
-  // Estado visual del asiento
-  // Prioridad: vista del ala > bloqueado > propuesta > vendido > seleccionado
+  // Estado visual del asiento (el reposacabezas conserva el color de zona)
   // --------------------------------------------------------------------------
   const applySeatState = useCallback((seatGroup) => {
     const t = T.current;
@@ -733,14 +731,13 @@ export default function PlaneConfigurator({ onExit }) {
     else if (t.proposal.has(key)) override = t.mats.proposal;
     else if (t.soldSet.has(key) || t.occupiedSet.has(key)) override = t.mats.sold;
     else if (state === 'sel') override = t.mats.selMark;
-    const base = seatGroup.userData.biz ? t.mats.seatBiz : t.mats.seatEco;
     seatGroup.traverse((m) => {
       if (!m.isMesh || m.name !== 'swap') return;
-      m.material = override || base;
+      m.material = override || t.mats.seat;
     });
   }, []);
 
-  // ---- minimapa (cabina en horizontal, morro a la izquierda) ------------------
+  // ---- minimapa ---------------------------------------------------------------
   const drawMinimap = useCallback(() => {
     const t = T.current;
     const cv = minimapRef.current;
@@ -760,7 +757,6 @@ export default function PlaneConfigurator({ onExit }) {
     ctx.clearRect(0, 0, cssW, cssH);
     const zx = (z) => pad + (z - Z_FRONT) * scale;
     const xy = (x) => cssH / 2 + x * scale;
-    // silueta: morro + alas
     ctx.strokeStyle = 'rgba(255,255,255,.4)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -773,7 +769,6 @@ export default function PlaneConfigurator({ onExit }) {
     ctx.moveTo(zx(Z_FRONT), cssH / 2 - 1.98 * scale);
     ctx.quadraticCurveTo(zx(Z_FRONT) - 14, cssH / 2, zx(Z_FRONT), cssH / 2 + 1.98 * scale);
     ctx.stroke();
-    // alas
     ctx.fillStyle = 'rgba(255,255,255,.25)';
     const wz = zx(t.wingZ.c);
     ctx.beginPath();
@@ -791,12 +786,12 @@ export default function PlaneConfigurator({ onExit }) {
     const dot = Math.max(2.4, scale * 0.42);
     for (const s of t.seatList) {
       const st = seatStates.current.get(s.key);
-      let c = s.biz ? '#7aa2d8' : '#aab2bf';
+      let c = ZONE_COLORS[s.zone];
       if (wingViewRef.current) {
         c = s.heat === 0 ? '#2f9e44' : s.heat === 1 ? '#e8a013' : '#d9480f';
       } else if (st === 'blocked') c = '#565b66';
       else if (t.proposal.has(s.key)) c = '#34d399';
-      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = '#8a6b1f';
+      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = '#454a54';
       else if (st === 'sel') c = '#4ade80';
       ctx.fillStyle = c;
       ctx.fillRect(zx(s.pz) - dot / 2, xy(s.px) - dot / 2, dot, dot);
@@ -830,22 +825,23 @@ export default function PlaneConfigurator({ onExit }) {
   const recount = useCallback(() => {
     const t = T.current;
     if (!t) return;
-    let sel = 0, blocked = 0, sold = 0, soldBiz = 0, soldExit = 0;
+    let sel = 0, blocked = 0, sold = 0;
+    const soldZ = { one: 0, plus: 0, space: 0, front: 0, regular: 0 };
+    const totZ = { one: 0, plus: 0, space: 0, front: 0, regular: 0 };
     for (const s of t.seatList) {
       const st = seatStates.current.get(s.key);
       if (st === 'blocked') { blocked++; continue; }
+      totZ[s.zone]++;
       if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) {
         sold++;
-        if (s.biz) soldBiz++;
-        if (s.exit) soldExit++;
+        soldZ[s.zone]++;
       }
       if (st === 'sel') sel++;
     }
-    setCounts({ total: t.seatList.length, sel, blocked, sold, soldBiz, soldExit });
+    setCounts({ total: t.seatList.length, sel, blocked, sold, soldZ, totZ });
     drawMinimap();
   }, [drawMinimap]);
 
-  // vista del ala (mapa de calidad de ventanilla)
   useEffect(() => {
     wingViewRef.current = wingView;
     const t = T.current;
@@ -869,7 +865,8 @@ export default function PlaneConfigurator({ onExit }) {
     const t = T.current;
     if (!t) return;
     const { scene, mats, unitBox, unitPlane } = t;
-    const { bizRows, ecoRows, ecoPitch, exitRows, occupancy } = params;
+    const { aircraft, pitch, occupancy } = params;
+    const model = AIRCRAFT[aircraft] || AIRCRAFT.a320;
 
     for (const k of ['seatsGroup', 'cabinGroup']) {
       if (t[k]) { scene.remove(t[k]); t[k] = null; }
@@ -890,40 +887,50 @@ export default function PlaneConfigurator({ onExit }) {
     t.rowMeta = new Map();
     t.occupiedSet = new Set();
 
-    // filas de salida de emergencia repartidas en la zona del ala
-    const exitSet = new Set();
-    for (let e = 0; e < exitRows; e++) {
-      exitSet.add(bizRows + Math.round(ecoRows * (0.45 + e * 0.18)));
-    }
+    const maxNum = displayNum(model.rows - 1);
+    const exitNums = new Set(model.exits);
+    const zoneOf = (num) => {
+      if (num === 1) return 'one';
+      if (num >= 2 && num <= 4) return 'plus';
+      if (exitNums.has(num)) return 'space';
+      if (num <= 9 || num >= maxNum - 2) return 'front';
+      return 'regular';
+    };
 
-    // ---- filas de asientos -----------------------------------------------------
+    // ---- filas ----------------------------------------------------------------
     let z = 0;
-    const totalRows = bizRows + ecoRows;
-    for (let r = 0; r < totalRows; r++) {
-      const biz = r < bizRows;
-      const isExit = exitSet.has(r);
-      const pitch = (biz ? BIZ_PITCH : ecoPitch) + (isExit ? 0.24 : 0);
-      const xs = biz ? BIZ_X : ECO_X;
-      const letters = biz ? BIZ_LETTERS : ECO_LETTERS;
-      z += pitch;
+    for (let r = 0; r < model.rows; r++) {
+      const num = displayNum(r);
+      const zone = zoneOf(num);
+      const isExit = exitNums.has(num);
+      const rowPitch =
+        pitch + (zone === 'one' ? 0.2 : zone === 'plus' ? 0.1 : 0) + (isExit ? 0.24 : 0);
+      z += rowPitch;
       const zRow = z;
-      t.rowMeta.set(r, { n: xs.length, biz, exit: isExit, z: zRow });
-      for (let i = 0; i < xs.length; i++) {
-        const px = xs[i];
-        const seat = (biz ? t.bizTemplate : t.ecoTemplate).clone();
+      // fila 1 solo en el lado izquierdo en A319/A320 (a la derecha va el galley)
+      const idxs =
+        num === 1 && model.row1LeftOnly ? [0, 1, 2] : [0, 1, 2, 3, 4, 5];
+      t.rowMeta.set(r, { num, zone, exit: isExit, z: zRow, idxs });
+      for (const i of idxs) {
+        const px = SEAT_X[i];
+        const seat = t.seatTemplate.clone();
         seat.position.set(px, 0, zRow);
         const key = `${r}-${i}`;
         const kind = seatKind(px);
         seat.userData = {
-          isSeat: true, key, row: r, idx: i,
-          letter: letters[i], kind, biz, exit: isExit,
+          isSeat: true, key, row: r, num, idx: i,
+          letter: LETTERS[i], kind, zone, exit: isExit,
           heat: 0, score: 0,
         };
+        // reposacabezas con el color de la zona tarifaria
+        seat.traverse((m) => {
+          if (m.isMesh && m.name === 'hr') m.material = mats.zone[zone];
+        });
         seatsGroup.add(seat);
         t.seatByKey.set(key, seat);
         t.seatList.push({
-          key, row: r, idx: i, letter: letters[i], kind, biz,
-          exit: isExit, px, pz: zRow, score: 0, heat: 0,
+          key, row: r, num, idx: i, letter: LETTERS[i], kind,
+          zone, exit: isExit, px, pz: zRow, score: 0, heat: 0,
         });
         if (hash01(key) < occupancy / 100) t.occupiedSet.add(key);
       }
@@ -932,20 +939,20 @@ export default function PlaneConfigurator({ onExit }) {
     const len = zEnd - Z_FRONT;
     t.cabin = { len, zEnd };
 
-    // ala: arranca a ~1/3 de la cabina (como en un narrowbody real)
     const wingC = Z_FRONT + len * 0.44;
     const wingHalf = 2.4;
     t.wingZ = { c: wingC, half: wingHalf };
 
-    // puntuación y calidad de ventanilla por asiento
     for (const s of t.seatList) {
       const overWing = Math.abs(s.pz - wingC) < wingHalf;
       const nearWing = Math.abs(s.pz - wingC) < wingHalf + 1.6;
       s.heat = overWing ? 2 : nearWing ? 1 : 0;
+      const zoneBonus =
+        s.zone === 'one' ? -1.2 : s.zone === 'plus' ? -0.8 : s.zone === 'space' ? -0.6 : 0;
       s.score =
         s.row * 0.045 +
         (s.kind === 'centro' ? 0.65 : s.kind === 'pasillo' ? 0.18 : 0) +
-        (s.exit ? -0.5 : 0);
+        zoneBonus;
       const g = t.seatByKey.get(s.key);
       g.userData.heat = s.heat;
       g.userData.score = s.score;
@@ -957,7 +964,6 @@ export default function PlaneConfigurator({ onExit }) {
     // ---- cabina ---------------------------------------------------------------
     const mkGeo = (g) => { t.disposables.push(g); return g; };
 
-    // fuselaje interior con ventanillas recortadas
     const fusGeo = mkGeo(new THREE.CylinderGeometry(R_FUS, R_FUS, len, 48, 1, true));
     fusGeo.rotateX(Math.PI / 2);
     t.winAlpha.repeat.set(1, len / WIN_EVERY);
@@ -965,7 +971,6 @@ export default function PlaneConfigurator({ onExit }) {
     fus.position.set(0, YC, Z_FRONT + len / 2);
     cabinGroup.add(fus);
 
-    // cristal de ventanillas (tira translúcida a lo largo, por dentro)
     for (const sx of [-1, 1]) {
       const strip = new THREE.Mesh(unitPlane, mats.glass);
       strip.scale.set(len, 0.55, 1);
@@ -975,7 +980,6 @@ export default function PlaneConfigurator({ onExit }) {
       cabinGroup.add(strip);
     }
 
-    // suelo + pasillo
     const floor = new THREE.Mesh(unitBox, mats.floor);
     floor.scale.set(3.96, 0.1, len);
     floor.position.set(0, -0.05, Z_FRONT + len / 2);
@@ -985,8 +989,6 @@ export default function PlaneConfigurator({ onExit }) {
     aisle.position.set(0, 0.012, Z_FRONT + len / 2);
     cabinGroup.add(aisle);
 
-    // maleteros: planos inclinados mirando al pasillo (invisibles desde arriba,
-    // para que la vista cenital siga siendo un plano de asientos limpio)
     for (const sx of [-1, 1]) {
       const bin = new THREE.Mesh(unitPlane, mats.bin);
       bin.scale.set(0.9, len, 1);
@@ -994,14 +996,12 @@ export default function PlaneConfigurator({ onExit }) {
       bin.rotation.z = (sx * Math.PI) / 2;
       bin.lookAt(0, 0.9, Z_FRONT + len / 2);
       cabinGroup.add(bin);
-      // tira de luz cálida bajo el maletero
       const strip = new THREE.Mesh(unitBox, mats.lightStrip);
       strip.scale.set(0.06, 0.03, len - 1);
       strip.position.set(sx * 0.78, 2.42, Z_FRONT + len / 2);
       cabinGroup.add(strip);
     }
 
-    // mamparos delantero y trasero
     const bhGeoF = mkGeo(new THREE.CircleGeometry(R_FUS, 40));
     const bhF = new THREE.Mesh(bhGeoF, mats.bulkhead);
     bhF.position.set(0, YC, Z_FRONT);
@@ -1012,10 +1012,8 @@ export default function PlaneConfigurator({ onExit }) {
     bhB.rotation.y = Math.PI;
     cabinGroup.add(bhB);
 
-    // rótulos EXIT en las filas de emergencia
-    for (const r of exitSet) {
-      const meta = t.rowMeta.get(r);
-      if (!meta) continue;
+    for (const [, meta] of t.rowMeta) {
+      if (!meta.exit) continue;
       for (const sx of [-1, 1]) {
         const sign = new THREE.Mesh(unitPlane, mats.exit);
         sign.scale.set(0.42, 0.16, 1);
@@ -1025,7 +1023,6 @@ export default function PlaneConfigurator({ onExit }) {
       }
     }
 
-    // alas y motores (visibles por las ventanillas y en la vista exterior)
     for (const sx of [-1, 1]) {
       const wing = new THREE.Mesh(unitBox, mats.wing);
       wing.scale.set(11.5, 0.16, 4.2);
@@ -1040,7 +1037,6 @@ export default function PlaneConfigurator({ onExit }) {
       cabinGroup.add(eng);
     }
 
-    // vista home: cenital encuadrando toda la cabina
     t.homeView.theta = 0;
     t.homeView.phi = 0.14;
     t.homeView.radius = Math.min(60, Math.max(14, len * 1.02));
@@ -1053,7 +1049,7 @@ export default function PlaneConfigurator({ onExit }) {
   // Compra: mejores N asientos contiguos (mismo bloque, sin cruzar pasillo)
   // --------------------------------------------------------------------------
   const priceOf = useCallback(
-    (s) => (s.biz ? prices.biz : prices.eco) + (s.exit ? prices.exit : 0),
+    (s) => (s.zone === 'regular' ? 0 : prices[s.zone] || 0),
     [prices]
   );
 
@@ -1076,19 +1072,20 @@ export default function PlaneConfigurator({ onExit }) {
     if (!t) return;
     clearProposal();
     const N = Math.max(1, Math.min(3, buyN));
-    const wantBiz = buyClass === 'biz';
+    const cheap = buyPref === 'cheap';
     const sellable = (s) => {
       const st = seatStates.current.get(s.key);
-      return st !== 'blocked' && !t.soldSet.has(s.key) && !t.occupiedSet.has(s.key);
+      if (st === 'blocked' || t.soldSet.has(s.key) || t.occupiedSet.has(s.key))
+        return false;
+      if (cheap && s.zone !== 'regular') return false;
+      return true;
     };
     const byRow = new Map();
     for (const s of t.seatList) {
-      if (s.biz !== wantBiz) continue;
       if (!byRow.has(s.row)) byRow.set(s.row, []);
       byRow.get(s.row)[s.idx] = s;
     }
-    // bloques sin pasillo: eco [0-2] y [3-5]; business [0-1] y [2-3]
-    const blocks = wantBiz ? [[0, 1], [2, 3]] : [[0, 1, 2], [3, 4, 5]];
+    const blocks = [[0, 1, 2], [3, 4, 5]];
     let best = null;
     for (const [row, arr] of byRow) {
       for (const block of blocks) {
@@ -1108,7 +1105,7 @@ export default function PlaneConfigurator({ onExit }) {
       }
     }
     if (!best) {
-      setProposal({ keys: [], total: 0, label: 'No quedan asientos juntos en esa clase' });
+      setProposal({ keys: [], total: 0, label: 'No quedan asientos juntos con ese criterio' });
       return;
     }
     const keys = best.seats.map((s) => s.key);
@@ -1121,10 +1118,11 @@ export default function PlaneConfigurator({ onExit }) {
       if (seat) applySeatState(seat);
     }
     const total = best.seats.reduce((a, s) => a + priceOf(s), 0);
-    const names = best.seats.map((s) => `${s.row + 1}${s.letter}`).join(', ');
-    setProposal({ keys, total, label: names });
+    const names = best.seats.map((s) => `${s.num}${s.letter}`).join(', ');
+    const zone = ZONE_LABELS[best.seats[0].zone];
+    setProposal({ keys, total, label: `${names} · ${zone}` });
     drawMinimap();
-  }, [buyN, buyClass, priceOf, applySeatState, clearProposal, drawMinimap]);
+  }, [buyN, buyPref, priceOf, applySeatState, clearProposal, drawMinimap]);
 
   const confirmProposal = useCallback(() => {
     const t = T.current;
@@ -1143,30 +1141,6 @@ export default function PlaneConfigurator({ onExit }) {
   // --------------------------------------------------------------------------
   // UI
   // --------------------------------------------------------------------------
-  const setP = (k) => (e) =>
-    setParams((p) => ({ ...p, [k]: Number(e.target.value) }));
-
-  const slider = (label, key, min, max, step, unit = '') => (
-    <div style={ui.row} key={key}>
-      <div style={ui.rowTop}>
-        <span>{label}</span>
-        <span style={ui.value}>
-          {params[key]}
-          {unit}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={params[key]}
-        onChange={setP(key)}
-        style={ui.range}
-      />
-    </div>
-  );
-
   const modeBtn = (m, label, color) => (
     <button
       key={m}
@@ -1183,20 +1157,34 @@ export default function PlaneConfigurator({ onExit }) {
   );
 
   const libres = counts.total - counts.blocked - counts.sold;
-  const revenue =
-    counts.soldBiz * prices.biz +
-    (counts.sold - counts.soldBiz) * prices.eco +
-    counts.soldExit * prices.exit;
-  const potential = useMemo(() => {
-    const t = T.current;
-    if (!t) return 0;
-    let sum = 0;
-    for (const s of t.seatList) {
-      if (seatStates.current.get(s.key) === 'blocked') continue;
-      sum += priceOf(s);
-    }
-    return sum;
-  }, [counts, priceOf]); // eslint-disable-line react-hooks/exhaustive-deps
+  const zoneRevenue = (zc) =>
+    (counts.soldZ[zc] || 0) * (zc === 'regular' ? 0 : prices[zc] || 0);
+  const revenue = ['one', 'plus', 'space', 'front'].reduce(
+    (a, zc) => a + zoneRevenue(zc), 0
+  );
+  const potential = useMemo(
+    () =>
+      ['one', 'plus', 'space', 'front'].reduce(
+        (a, zc) => a + (counts.totZ[zc] || 0) * (prices[zc] || 0), 0
+      ),
+    [counts, prices]
+  );
+
+  const priceInput = (zc, label) => (
+    <label style={ui.priceLbl} key={zc}>
+      <span>
+        <span style={{ ...ui.zoneDot, background: ZONE_COLORS[zc] }} />
+        {label}
+      </span>
+      <input
+        type="number" min="0" step="1" value={prices[zc]}
+        onChange={(e) =>
+          setPrices((p) => ({ ...p, [zc]: Number(e.target.value) || 0 }))
+        }
+        style={ui.priceInput}
+      />
+    </label>
+  );
 
   const panelStyle = isNarrow
     ? {
@@ -1208,6 +1196,8 @@ export default function PlaneConfigurator({ onExit }) {
         ...ui.panel,
         transform: panelOpen ? 'translateX(0)' : 'translateX(calc(100% + 30px))',
       };
+
+  const model = AIRCRAFT[params.aircraft] || AIRCRAFT.a320;
 
   return (
     <div style={{ position: 'fixed', inset: 0, userSelect: 'none' }}>
@@ -1272,11 +1262,32 @@ export default function PlaneConfigurator({ onExit }) {
         <div>
           <div style={ui.panelHead}>
             <strong style={{ letterSpacing: '.5px' }}>
-              TICKETING<span style={{ color: '#3b82f6' }}>3D</span> · Cabina A320
+              TICKETING<span style={{ color: '#3b82f6' }}>3D</span> · Cabina{' '}
+              {model.label}
             </strong>
             <button style={ui.closeBtn} onClick={() => setPanelOpen(false)}>
               <Ic size={17}>{icons.x}</Ic>
             </button>
+          </div>
+
+          {/* selector de avión de la flota */}
+          <div style={ui.fleetRow}>
+            {Object.entries(AIRCRAFT).map(([id2, m2]) => (
+              <button
+                key={id2}
+                onClick={() => setParams((p) => ({ ...p, aircraft: id2 }))}
+                style={{
+                  ...ui.fleetBtn,
+                  background:
+                    params.aircraft === id2 ? '#1d4ed8' : 'rgba(255,255,255,.06)',
+                  borderColor:
+                    params.aircraft === id2 ? '#1d4ed8' : 'rgba(255,255,255,.15)',
+                  color: params.aircraft === id2 ? '#fff' : '#c9c6cf',
+                }}
+              >
+                {m2.label}
+              </button>
+            ))}
           </div>
 
           <div style={ui.counters}>
@@ -1300,35 +1311,25 @@ export default function PlaneConfigurator({ onExit }) {
 
           <div style={ui.revenue}>
             <span>
-              Ingresos: <b style={{ color: '#7ce38b' }}>{revenue.toFixed(2)} €</b>
+              Ingresos asientos:{' '}
+              <b style={{ color: '#7ce38b' }}>{revenue.toFixed(2)} €</b>
             </span>
-            <span style={{ opacity: 0.6 }}>avión lleno {potential.toFixed(0)} €</span>
+            <span style={{ opacity: 0.6 }}>
+              potencial {potential.toFixed(0)} €
+            </span>
           </div>
-          <div style={ui.priceRow3}>
-            <label style={ui.priceLbl}>
-              Turista
-              <input
-                type="number" min="0" step="1" value={prices.eco}
-                onChange={(e) => setPrices((p) => ({ ...p, eco: Number(e.target.value) || 0 }))}
-                style={ui.priceInput}
-              />
-            </label>
-            <label style={ui.priceLbl}>
-              Business
-              <input
-                type="number" min="0" step="1" value={prices.biz}
-                onChange={(e) => setPrices((p) => ({ ...p, biz: Number(e.target.value) || 0 }))}
-                style={ui.priceInput}
-              />
-            </label>
-            <label style={ui.priceLbl}>
-              Supl. salida
-              <input
-                type="number" min="0" step="1" value={prices.exit}
-                onChange={(e) => setPrices((p) => ({ ...p, exit: Number(e.target.value) || 0 }))}
-                style={ui.priceInput}
-              />
-            </label>
+
+          {/* precios por zona tarifaria */}
+          <div style={ui.priceGrid}>
+            {priceInput('one', 'Space One')}
+            {priceInput('plus', 'Space Plus')}
+            {priceInput('space', 'Space (salida)')}
+            {priceInput('front', 'Delant./tras.')}
+          </div>
+          <div style={ui.zoneNote}>
+            <span style={{ ...ui.zoneDot, background: ZONE_COLORS.regular }} />
+            Regular: incluido en la tarifa · sin fila 13, como en los aviones
+            reales
           </div>
 
           <div style={ui.buyBox}>
@@ -1339,16 +1340,18 @@ export default function PlaneConfigurator({ onExit }) {
             <div style={ui.buyRow}>
               <input
                 type="number" min="1" max="3" value={buyN}
-                onChange={(e) => setBuyN(Math.max(1, Math.min(3, Number(e.target.value) || 1)))}
+                onChange={(e) =>
+                  setBuyN(Math.max(1, Math.min(3, Number(e.target.value) || 1)))
+                }
                 style={ui.buyInput}
               />
               <select
-                value={buyClass}
-                onChange={(e) => setBuyClass(e.target.value)}
+                value={buyPref}
+                onChange={(e) => setBuyPref(e.target.value)}
                 style={ui.buySelect}
               >
-                <option value="eco">Turista</option>
-                <option value="biz">Business</option>
+                <option value="best">Mejores asientos</option>
+                <option value="cheap">Sin coste (Regular)</option>
               </select>
               <button onClick={proposeSeats} style={ui.buyBtn}>
                 Sugerir
@@ -1359,7 +1362,7 @@ export default function PlaneConfigurator({ onExit }) {
                 {proposal.keys.length ? (
                   <>
                     <div style={{ marginBottom: 6 }}>
-                      Asientos <b style={{ color: '#34d399' }}>{proposal.label}</b>
+                      <b style={{ color: '#34d399' }}>{proposal.label}</b>
                       {' · '}
                       {proposal.total.toFixed(2)} €
                     </div>
@@ -1379,11 +1382,34 @@ export default function PlaneConfigurator({ onExit }) {
             )}
           </div>
 
-          {slider('Filas Business', 'bizRows', 0, 4, 1)}
-          {slider('Filas Turista', 'ecoRows', 10, 38, 1)}
-          {slider('Pitch turista', 'ecoPitch', 0.71, 0.92, 0.01, ' m')}
-          {slider('Salidas de emergencia', 'exitRows', 0, 2, 1)}
-          {slider('Ocupación simulada', 'occupancy', 0, 100, 1, '%')}
+          <div style={ui.row}>
+            <div style={ui.rowTop}>
+              <span>Pitch base</span>
+              <span style={ui.value}>{params.pitch} m</span>
+            </div>
+            <input
+              type="range" min="0.71" max="0.92" step="0.01"
+              value={params.pitch}
+              onChange={(e) =>
+                setParams((p) => ({ ...p, pitch: Number(e.target.value) }))
+              }
+              style={ui.range}
+            />
+          </div>
+          <div style={ui.row}>
+            <div style={ui.rowTop}>
+              <span>Ocupación simulada</span>
+              <span style={ui.value}>{params.occupancy}%</span>
+            </div>
+            <input
+              type="range" min="0" max="100" step="1"
+              value={params.occupancy}
+              onChange={(e) =>
+                setParams((p) => ({ ...p, occupancy: Number(e.target.value) }))
+              }
+              style={ui.range}
+            />
+          </div>
 
           <div style={ui.modesLbl}>
             Al tocar un asiento (arrastra para pintar varios):
@@ -1427,7 +1453,7 @@ export default function PlaneConfigurator({ onExit }) {
 }
 
 // ----------------------------------------------------------------------------
-// estilos (drawer glassmorphism, acento azul aerolínea #3b82f6)
+// estilos (drawer glassmorphism, acento azul #3b82f6)
 // ----------------------------------------------------------------------------
 const ui = {
   panel: {
@@ -1469,6 +1495,15 @@ const ui = {
     fontSize: 13.5,
   },
   closeBtn: { background: 'none', border: 'none', color: '#9a95a3', cursor: 'pointer', padding: 4 },
+  fleetRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 10 },
+  fleetBtn: {
+    padding: '9px 4px',
+    borderRadius: 9,
+    border: '1px solid',
+    cursor: 'pointer',
+    fontSize: 12.5,
+    fontWeight: 700,
+  },
   counters: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginBottom: 10 },
   counter: {
     border: '1px solid rgba(255,255,255,.14)',
@@ -1490,8 +1525,8 @@ const ui = {
     background: 'rgba(255,255,255,.04)',
     border: '1px solid rgba(255,255,255,.1)',
   },
-  priceRow3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 10 },
-  priceLbl: { fontSize: 11, opacity: 0.85, display: 'flex', flexDirection: 'column', gap: 4 },
+  priceGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 6 },
+  priceLbl: { fontSize: 11, opacity: 0.9, display: 'flex', flexDirection: 'column', gap: 4 },
   priceInput: {
     width: '100%',
     padding: '6px 8px',
@@ -1501,6 +1536,15 @@ const ui = {
     color: '#e8e6ec',
     fontSize: 13,
   },
+  zoneDot: {
+    display: 'inline-block',
+    width: 9,
+    height: 9,
+    borderRadius: '50%',
+    marginRight: 6,
+    verticalAlign: '-1px',
+  },
+  zoneNote: { fontSize: 10.5, opacity: 0.6, marginBottom: 10, lineHeight: 1.5 },
   buyBox: {
     border: '1px solid rgba(59,130,246,.4)',
     borderRadius: 10,

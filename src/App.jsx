@@ -76,12 +76,13 @@ export default function App() {
           </svg>
           <h2 style={st.cardTitle}>Cabina de avión</h2>
           <p style={st.cardDesc}>
-            Narrowbody tipo A320 con Business y Turista. Elige asiento viendo lo
-            que de verdad compras: ¿te toca el ala en la ventanilla?
+            Flota low-cost A319 · A320 · A321 con zonas tarifarias Space One,
+            Space Plus y Space. Elige asiento viendo lo que de verdad compras:
+            ¿te toca el ala en la ventanilla?
           </p>
           <ul style={st.cardList}>
             <li>POV con vista real por la ventanilla</li>
-            <li>Mapa "¿me toca ala?" y salidas de emergencia</li>
+            <li>Zonas y salidas de emergencia por modelo, sin fila 13</li>
             <li>Viajamos juntos: mejores asientos contiguos</li>
           </ul>
           <span className="t3d-go" style={{ ...st.go, color: '#7ab5ff' }}>
