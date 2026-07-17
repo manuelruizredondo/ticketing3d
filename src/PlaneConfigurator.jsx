@@ -250,6 +250,18 @@ export default function PlaneConfigurator({ onExit }) {
     awctx.fillRect(0, 0, 8, 64);
     const aoWallTex = new THREE.CanvasTexture(aoWallCv);
 
+    // degradado lineal oscuro→transparente para la junta cojín-respaldo
+    const aoSeatCv = document.createElement('canvas');
+    aoSeatCv.width = 8;
+    aoSeatCv.height = 64;
+    const asctx = aoSeatCv.getContext('2d');
+    const sg = asctx.createLinearGradient(0, 64, 0, 0);
+    sg.addColorStop(0, 'rgba(0,0,0,0.45)'); // pegado a la junta
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    asctx.fillStyle = sg;
+    asctx.fillRect(0, 0, 8, 64);
+    const aoSeatTex = new THREE.CanvasTexture(aoSeatCv);
+
     // ---- materiales -----------------------------------------------------------
     const mkStd = (opts) => new THREE.MeshStandardMaterial(opts);
     const mats = {
@@ -288,6 +300,11 @@ export default function PlaneConfigurator({ onExit }) {
       aoWall: new THREE.MeshBasicMaterial({
         map: aoWallTex, transparent: true, depthWrite: false,
       }),
+      aoSeat: new THREE.MeshBasicMaterial({
+        map: aoSeatTex, transparent: true, depthWrite: false,
+      }),
+      plan: mkStd({ color: 0xd9dde3, roughness: 0.9, side: THREE.DoubleSide }),
+      planDark: mkStd({ color: 0x8f959e, roughness: 0.9, side: THREE.DoubleSide }),
       // reposacabezas de color por zona tarifaria (como las fundas reales)
       zone: {
         one: mkStd({ color: 0xf2d21f, roughness: 0.85 }),
@@ -376,6 +393,18 @@ export default function PlaneConfigurator({ onExit }) {
       cover.scale.set(w * 0.94, 0.26, 0.115);
       cover.name = 'hr';
       tilt.add(cover);
+      // oclusión de la junta cojín-respaldo: degradado oscuro→transparente
+      // subiendo por la base del respaldo y retrocediendo sobre el cojín
+      const creaseBack = new THREE.Mesh(unitPlane, mats.aoSeat);
+      creaseBack.scale.set(w * 0.98, 0.2, 1);
+      creaseBack.position.set(0, 0.1, -0.043);
+      creaseBack.rotation.y = Math.PI;
+      tilt.add(creaseBack);
+      const creaseSeat = new THREE.Mesh(unitPlane, mats.aoSeat);
+      creaseSeat.scale.set(w * 0.98, 0.17, 1);
+      creaseSeat.rotation.x = -Math.PI / 2;
+      creaseSeat.position.set(0, 0.409, 0.135);
+      g.add(creaseSeat);
       // sin reposabrazos propios: en un avión se COMPARTEN entre asientos y se
       // generan aparte por fila (uno entre cada par + los dos extremos)
       return bakeTemplate(g);
@@ -426,6 +455,8 @@ export default function PlaneConfigurator({ onExit }) {
       markerKeys: [],
       markerIdx: 0,
       markerNextAt: 0,
+      lastAircraft: null,
+      introStart: 0,
       raf: 0,
     };
 
@@ -688,6 +719,20 @@ export default function PlaneConfigurator({ onExit }) {
         if (c.position.z > t.cabin.zEnd + 60) c.position.z -= 150;
       }
 
+      // animación de cambio de avión: el fuselaje se estira hasta su longitud
+      if (t.introStart) {
+        const k = Math.min(1, (now - t.introStart) / 700);
+        const e = 1 - Math.pow(1 - k, 3);
+        const s = 0.86 + 0.14 * e;
+        if (t.cabinGroup) t.cabinGroup.scale.z = s;
+        if (t.seatsGroup) t.seatsGroup.scale.z = s;
+        if (k >= 1) {
+          t.introStart = 0;
+          if (t.cabinGroup) t.cabinGroup.scale.z = 1;
+          if (t.seatsGroup) t.seatsGroup.scale.z = 1;
+        }
+      }
+
       if (t.flight) {
         const k = Math.min(1, (now - t.flight.t0) / (t.flight.dur || FLY_MS));
         const e = easeInOutCubic(k);
@@ -793,11 +838,13 @@ export default function PlaneConfigurator({ onExit }) {
     const t = T.current;
     const cv = minimapRef.current;
     if (!t || !cv || !t.seatList.length) return;
-    const cssW = 230;
-    const pad = 12;
-    const len = t.cabin.zEnd - Z_FRONT;
+    const cssW = 252;
+    const pad = 8;
+    const zMin = Z_FRONT - 4.4; // morro
+    const zMax = t.cabin.zEnd + 6.2; // cola
+    const len = zMax - zMin;
     const scale = (cssW - pad * 2) / len;
-    const cssH = 3.96 * scale + pad * 2 + 8;
+    const cssH = Math.max(3.96 * scale + pad * 2 + 8, 9.6 * scale + 8);
     const dpr = 2;
     cv.width = cssW * dpr;
     cv.height = cssH * dpr;
@@ -806,20 +853,39 @@ export default function PlaneConfigurator({ onExit }) {
     const ctx = cv.getContext('2d');
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, cssW, cssH);
-    const zx = (z) => pad + (z - Z_FRONT) * scale;
+    const zx = (z) => pad + (z - zMin) * scale;
     const xy = (x) => cssH / 2 + x * scale;
-    ctx.strokeStyle = 'rgba(255,255,255,.4)';
+    const yT = cssH / 2 - 1.98 * scale;
+    const yB = cssH / 2 + 1.98 * scale;
+    ctx.strokeStyle = 'rgba(255,255,255,.45)';
     ctx.lineWidth = 1.5;
+    // tubo + morro redondeado + cono de cola
     ctx.beginPath();
-    ctx.moveTo(zx(Z_FRONT), cssH / 2 - 1.98 * scale);
-    ctx.lineTo(zx(t.cabin.zEnd), cssH / 2 - 1.98 * scale);
-    ctx.moveTo(zx(Z_FRONT), cssH / 2 + 1.98 * scale);
-    ctx.lineTo(zx(t.cabin.zEnd), cssH / 2 + 1.98 * scale);
+    ctx.moveTo(zx(t.cabin.zEnd), yT);
+    ctx.lineTo(zx(Z_FRONT), yT);
+    ctx.quadraticCurveTo(zx(zMin), cssH / 2, zx(Z_FRONT), yB);
+    ctx.lineTo(zx(t.cabin.zEnd), yB);
+    ctx.quadraticCurveTo(zx(zMax) - 4, cssH / 2 + 2, zx(zMax), cssH / 2);
+    ctx.quadraticCurveTo(zx(zMax) - 4, cssH / 2 - 2, zx(t.cabin.zEnd), yT);
     ctx.stroke();
+    // parabrisas
+    ctx.strokeStyle = 'rgba(255,255,255,.55)';
     ctx.beginPath();
-    ctx.moveTo(zx(Z_FRONT), cssH / 2 - 1.98 * scale);
-    ctx.quadraticCurveTo(zx(Z_FRONT) - 14, cssH / 2, zx(Z_FRONT), cssH / 2 + 1.98 * scale);
+    ctx.moveTo(zx(Z_FRONT - 2.2), cssH / 2 - 1.1 * scale);
+    ctx.quadraticCurveTo(zx(Z_FRONT - 3.4), cssH / 2, zx(Z_FRONT - 2.2), cssH / 2 + 1.1 * scale);
     ctx.stroke();
+    // estabilizadores de cola + deriva
+    ctx.fillStyle = 'rgba(255,255,255,.28)';
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(zx(t.cabin.zEnd + 3.4), xy(s * 0.4));
+      ctx.lineTo(zx(t.cabin.zEnd + 5.4), xy(s * 4.5));
+      ctx.lineTo(zx(t.cabin.zEnd + 6.0), xy(s * 4.5));
+      ctx.lineTo(zx(t.cabin.zEnd + 5.0), xy(s * 0.4));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillRect(zx(t.cabin.zEnd + 3.2), cssH / 2 - 1.5, 2.6 * scale, 3);
     ctx.fillStyle = 'rgba(255,255,255,.25)';
     const wz = zx(t.wingZ.c);
     ctx.beginPath();
@@ -847,7 +913,7 @@ export default function PlaneConfigurator({ onExit }) {
       ctx.fillStyle = c;
       ctx.fillRect(zx(s.pz) - dot / 2, xy(s.px) - dot / 2, dot, dot);
     }
-    t.miniMap = { scale, pad, cssH };
+    t.miniMap = { scale, pad, cssH, zMin };
   }, []);
 
   const onMinimapClick = useCallback((e) => {
@@ -857,11 +923,11 @@ export default function PlaneConfigurator({ onExit }) {
     const rect = cv.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
-    const { scale, pad, cssH } = t.miniMap;
+    const { scale, pad, cssH, zMin } = t.miniMap;
     let best = null;
     let bestD = 9e9;
     for (const s of t.seatList) {
-      const x = pad + (s.pz - Z_FRONT) * scale;
+      const x = pad + (s.pz - zMin) * scale;
       const y = cssH / 2 + s.px * scale;
       const d = Math.hypot(x - cx, y - cy);
       if (d < bestD) { bestD = d; best = s; }
@@ -1033,7 +1099,11 @@ export default function PlaneConfigurator({ onExit }) {
       applySeatState(g);
     }
     seatsGroup.updateMatrixWorld(true);
-    seatsGroup.traverse((o) => (o.matrixAutoUpdate = false));
+    // congela las matrices de las butacas pero deja vivo el nodo raíz para
+    // poder animar la escala del grupo al cambiar de avión
+    seatsGroup.traverse((o) => {
+      if (o !== seatsGroup) o.matrixAutoUpdate = false;
+    });
 
     // fusionar reposabrazos y manchas AO en un mesh cada uno (2 draw calls)
     if (armGeos.length) {
@@ -1153,10 +1223,73 @@ export default function PlaneConfigurator({ onExit }) {
       cabinGroup.add(pylon);
     }
 
+    // ---- morro y cola planos, estilo plano de asientos (SVG tumbado) ----------
+    const noseShape = new THREE.Shape();
+    noseShape.moveTo(-1.98, 0);
+    noseShape.quadraticCurveTo(-1.85, 2.6, 0, 4.4);
+    noseShape.quadraticCurveTo(1.85, 2.6, 1.98, 0);
+    noseShape.closePath();
+    const noseGeo = mkGeo(new THREE.ShapeGeometry(noseShape, 24));
+    noseGeo.rotateX(-Math.PI / 2);
+    const nose = new THREE.Mesh(noseGeo, mats.plan);
+    nose.position.set(0, 0.02, Z_FRONT);
+    cabinGroup.add(nose);
+    // parabrisas del cockpit: cuatro paneles oscuros en abanico
+    const wsSpin = [0.95, 0.35, -0.35, -0.95];
+    for (let i = 0; i < 4; i++) {
+      const pane = new THREE.Mesh(unitPlane, mats.planDark);
+      pane.scale.set(0.52, 0.26, 1);
+      const wx = [-1.05, -0.38, 0.38, 1.05][i];
+      pane.rotation.set(-Math.PI / 2, 0, wsSpin[i]);
+      pane.position.set(wx, 0.03, Z_FRONT - 2.6 - (Math.abs(wx) < 0.5 ? 0.5 : 0.1));
+      cabinGroup.add(pane);
+    }
+    // cola: cono + estabilizadores horizontales + proyección de la deriva
+    const tailShape = new THREE.Shape();
+    tailShape.moveTo(-1.98, 0);
+    tailShape.quadraticCurveTo(-1.7, -3.4, -0.45, -5.6);
+    tailShape.quadraticCurveTo(0, -6.0, 0.45, -5.6);
+    tailShape.quadraticCurveTo(1.7, -3.4, 1.98, 0);
+    tailShape.closePath();
+    const tailGeo = mkGeo(new THREE.ShapeGeometry(tailShape, 24));
+    tailGeo.rotateX(-Math.PI / 2);
+    const tail = new THREE.Mesh(tailGeo, mats.plan);
+    tail.position.set(0, 0.02, zEnd);
+    cabinGroup.add(tail);
+    const stabShape = new THREE.Shape();
+    stabShape.moveTo(0.4, -3.4);
+    stabShape.lineTo(4.7, -5.2);
+    stabShape.lineTo(4.7, -5.9);
+    stabShape.lineTo(0.4, -5.0);
+    stabShape.closePath();
+    const stabGeo = mkGeo(new THREE.ShapeGeometry(stabShape));
+    stabGeo.rotateX(-Math.PI / 2);
+    for (const sx of [-1, 1]) {
+      const stab = new THREE.Mesh(stabGeo, mats.plan);
+      stab.scale.x = sx;
+      stab.position.set(0, 0.025, zEnd);
+      cabinGroup.add(stab);
+    }
+    const fin = new THREE.Mesh(unitBox, mats.planDark);
+    fin.scale.set(0.22, 0.02, 2.6);
+    fin.position.set(0, 0.035, zEnd + 4.6);
+    cabinGroup.add(fin);
+
     t.homeView.theta = 0;
     t.homeView.phi = 0.14;
-    t.homeView.radius = Math.min(60, Math.max(14, len * 1.02));
-    t.homeView.target.set(0, 0.6, Z_FRONT + len / 2);
+    t.homeView.radius = Math.min(60, Math.max(16, (len + 10.5) * 1.0));
+    t.homeView.target.set(0, 0.6, Z_FRONT + (len + 1.5) / 2);
+
+    // animación al cambiar de avión: la cabina se estira hasta su nueva
+    // longitud mientras la cámara vuela a encuadrarla
+    const changed = t.lastAircraft !== aircraft;
+    t.lastAircraft = aircraft;
+    if (changed) {
+      t.introStart = performance.now();
+      cabinGroup.scale.z = 0.86;
+      seatsGroup.scale.z = 0.86;
+      if (!t.pov.active) t.goHome();
+    }
 
     recount();
   }, [params, applySeatState, recount]);
