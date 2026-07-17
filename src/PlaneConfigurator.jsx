@@ -235,8 +235,8 @@ export default function PlaneConfigurator({ onExit }) {
       glass: new THREE.MeshBasicMaterial({
         color: 0xcfe6fa, transparent: true, opacity: 0.16, depthWrite: false,
       }),
-      floor: mkStd({ color: 0x3c4657, roughness: 0.95 }),
-      aisle: mkStd({ color: 0x2b3342, roughness: 0.95 }),
+      floor: mkStd({ color: 0x9aa0ab, roughness: 0.95 }), // moqueta clara
+      aisle: mkStd({ color: 0x4a5160, roughness: 0.95 }),
       bin: mkStd({ color: 0xdadfe6, roughness: 0.85 }),
       bulkhead: mkStd({ color: 0xd6dbe2, roughness: 0.9 }),
       lightStrip: mkStd({ color: 0xf5f2ea, emissive: 0xfff3df, emissiveIntensity: 0.9 }),
@@ -246,8 +246,9 @@ export default function PlaneConfigurator({ onExit }) {
       blocked: mkStd({ color: 0x8b919c, roughness: 0.95 }),
       sold: mkStd({ color: 0x23262e, roughness: 0.95 }),
       proposal: mkStd({ color: 0x1f9d55, emissive: 0x34d399, emissiveIntensity: 0.5, roughness: 0.8 }),
-      wing: mkStd({ color: 0xc9ced6, metalness: 0.55, roughness: 0.35 }),
+      wing: mkStd({ color: 0xc9ced6, metalness: 0.55, roughness: 0.35, side: THREE.DoubleSide }),
       engine: mkStd({ color: 0xb8bec7, metalness: 0.6, roughness: 0.35 }),
+      intake: mkStd({ color: 0x1c1f26, roughness: 0.6 }),
       exit: new THREE.MeshBasicMaterial({ map: exitTex, toneMapped: false }),
       heat: [
         mkStd({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.3, roughness: 0.85 }),
@@ -1026,18 +1027,40 @@ export default function PlaneConfigurator({ onExit }) {
       }
     }
 
+    // ala trapezoidal en flecha que nace del fuselaje (la raíz queda dentro
+    // del tubo, así el encuentro ala-fuselaje se ve continuo)
+    const wingShape = new THREE.Shape();
+    wingShape.moveTo(0, -1.8); // raíz, borde de ataque
+    wingShape.lineTo(10.5, 1.4); // punta, borde de ataque (flecha ~31°)
+    wingShape.lineTo(10.5, 2.5); // punta, borde de fuga
+    wingShape.lineTo(0, 2.0); // raíz, borde de fuga
+    wingShape.closePath();
+    const wingGeo = mkGeo(
+      new THREE.ExtrudeGeometry(wingShape, { depth: 0.14, bevelEnabled: false })
+    );
+    wingGeo.rotateX(Math.PI / 2);
     for (const sx of [-1, 1]) {
-      const wing = new THREE.Mesh(unitBox, mats.wing);
-      wing.scale.set(11.5, 0.16, 4.2);
-      wing.position.set(sx * (R_FUS + 5.4), 1.05, wingC + 1.1);
-      wing.rotation.y = sx * -0.3;
-      wing.rotation.z = sx * 0.05;
+      const wing = new THREE.Mesh(wingGeo, mats.wing);
+      wing.scale.x = sx;
+      // la raíz queda pegada a la pared interior para no asomar por el suelo
+      wing.position.set(sx * 1.95, 0.85, wingC);
+      wing.rotation.z = sx * 0.05; // diedro sutil hacia arriba
       cabinGroup.add(wing);
-      const engGeo = mkGeo(new THREE.CylinderGeometry(0.75, 0.68, 2.2, 20));
+      // motor colgado bajo el ala, con pilón y entrada oscura
+      const engGeo = mkGeo(new THREE.CylinderGeometry(0.7, 0.62, 2.3, 20));
       engGeo.rotateX(Math.PI / 2);
       const eng = new THREE.Mesh(engGeo, mats.engine);
-      eng.position.set(sx * (R_FUS + 3.2), 0.15, wingC - 0.8);
+      eng.position.set(sx * 4.6, 0.38, wingC - 1.1);
       cabinGroup.add(eng);
+      const intGeo = mkGeo(new THREE.CircleGeometry(0.62, 24));
+      const intake = new THREE.Mesh(intGeo, mats.intake);
+      intake.rotation.y = Math.PI;
+      intake.position.set(sx * 4.6, 0.38, wingC - 2.26);
+      cabinGroup.add(intake);
+      const pylon = new THREE.Mesh(unitBox, mats.engine);
+      pylon.scale.set(0.16, 0.5, 1.3);
+      pylon.position.set(sx * 4.6, 0.85, wingC - 0.5);
+      cabinGroup.add(pylon);
     }
 
     t.homeView.theta = 0;
