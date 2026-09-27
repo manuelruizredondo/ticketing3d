@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import './panel.css';
 
 // ============================================================================
 // Utilidades compartidas por los configuradores (cine y avión)
@@ -229,3 +230,171 @@ export const icons = {
     <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
   ),
 };
+
+// ============================================================================
+// Kit del panel lateral estilo Apple (clases en panel.css)
+// ============================================================================
+
+const nf = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+export const fmtNum = (n) => nf.format(n);
+const cf = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
+export const fmtEUR = (n) => cf.format(n);
+
+export function Panel({ open, sheet, accent, label, children }) {
+  return (
+    <aside
+      className={`t3d-panel${sheet ? ' is-sheet' : ''}${open ? '' : ' is-closed'}`}
+      style={{ '--accent': accent }}
+      aria-label={label}
+      aria-hidden={!open}
+      {...(open ? {} : { inert: '' })}
+    >
+      {sheet && <div className="t3d-grabber" />}
+      {children}
+    </aside>
+  );
+}
+
+export const PanelHeader = ({ title, subtitle, onClose }) => (
+  <div className="t3d-head">
+    <div>
+      <div className="t3d-title">{title}</div>
+      {subtitle && <div className="t3d-subtitle">{subtitle}</div>}
+    </div>
+    <button className="t3d-icon-btn" aria-label="Cerrar panel" onClick={onClose}>
+      <Ic size={14}>{icons.x}</Ic>
+    </button>
+  </div>
+);
+
+// sección con título pequeño; `plain` deja el contenido sin tarjeta agrupada
+export const Section = ({ label, footnote, plain, children }) => (
+  <section className="t3d-section">
+    {label && <div className="t3d-section-label">{label}</div>}
+    {plain ? children : <div className="t3d-group">{children}</div>}
+    {footnote && <div className="t3d-footnote">{footnote}</div>}
+  </section>
+);
+
+export const Row = ({ label, dot, detail, strong, children }) => (
+  <div className="t3d-row">
+    <span className="t3d-row-label">
+      {dot && <span className="t3d-dot" style={{ background: dot }} />}
+      {label}
+    </span>
+    {detail !== undefined && (
+      <span className={`t3d-row-detail${strong ? ' t3d-row-strong' : ''}`}>{detail}</span>
+    )}
+    {children}
+  </div>
+);
+
+export const RowButton = ({ children, onClick }) => (
+  <button className="t3d-row t3d-row-button" onClick={onClick}>
+    {children}
+  </button>
+);
+
+export const Stats = ({ items }) => (
+  <div className="t3d-stats">
+    {items.map((it) => (
+      <div className="t3d-stat" key={it.label}>
+        <div className="t3d-stat-value">{it.value}</div>
+        <div className="t3d-stat-label">
+          <span className="t3d-dot" style={{ background: it.color }} />
+          {it.label}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
+export function SliderRow({ label, value, unit = '', min, max, step, onChange }) {
+  const p = ((value - min) / (max - min)) * 100;
+  return (
+    <div className="t3d-row t3d-slider">
+      <div className="t3d-slider-top">
+        <span>{label}</span>
+        <span className="t3d-row-detail">
+          {fmtNum(value)}
+          {unit}
+        </span>
+      </div>
+      <input
+        className="t3d-range"
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ '--p': `${p}%` }}
+      />
+    </div>
+  );
+}
+
+export const Segmented = ({ options, value, onChange, label }) => (
+  <div className="t3d-seg" role="group" aria-label={label}>
+    {options.map((o) => (
+      <button key={o.value} aria-pressed={value === o.value} onClick={() => onChange(o.value)}>
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
+
+export const Switch = ({ checked, onChange, label }) => (
+  <button
+    className="t3d-switch"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    onClick={() => onChange(!checked)}
+  />
+);
+
+export const Stepper = ({ value, min, max, onChange, label }) => (
+  <div className="t3d-stepper" role="group" aria-label={label}>
+    <button aria-label="Menos" disabled={value <= min} onClick={() => onChange(value - 1)}>
+      −
+    </button>
+    <span aria-live="polite">{value}</span>
+    <button aria-label="Más" disabled={value >= max} onClick={() => onChange(value + 1)}>
+      +
+    </button>
+  </div>
+);
+
+export const NumberRow = ({ label, dot, value, step = 1, onChange }) => (
+  <label className="t3d-row">
+    <span className="t3d-row-label">
+      {dot && <span className="t3d-dot" style={{ background: dot }} />}
+      {label}
+    </span>
+    <input
+      className="t3d-num"
+      type="number"
+      min="0"
+      step={step}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value) || 0)}
+    />
+    <span className="t3d-row-detail">€</span>
+  </label>
+);
+
+// baldosa estilo Centro de control; `active` la convierte en interruptor
+export const Tile = ({ icon, label, active, onClick }) => (
+  <button
+    className="t3d-tile"
+    onClick={onClick}
+    {...(active === undefined ? {} : { 'aria-pressed': active })}
+  >
+    <span className="t3d-tile-icon">
+      <Ic size={14}>{icon}</Ic>
+    </span>
+    {label}
+  </button>
+);

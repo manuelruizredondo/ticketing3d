@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
-  Ic, icons,
+  Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
+  SliderRow, Segmented, Stepper, NumberRow, Tile,
 } from './shared.jsx';
 
 // ============================================================================
@@ -1381,22 +1382,6 @@ export default function PlaneConfigurator({ onExit }) {
   // --------------------------------------------------------------------------
   // UI
   // --------------------------------------------------------------------------
-  const modeBtn = (m, label, color) => (
-    <button
-      key={m}
-      aria-pressed={mode === m}
-      onClick={() => setMode(m)}
-      style={{
-        ...ui.modeBtn,
-        background: mode === m ? color : 'rgba(255,255,255,.06)',
-        borderColor: mode === m ? color : 'rgba(255,255,255,.15)',
-        color: mode === m ? '#fff' : '#c9c6cf',
-      }}
-    >
-      {label}
-    </button>
-  );
-
   const libres = counts.total - counts.blocked - counts.sold;
   const zoneRevenue = (zc) =>
     (counts.soldZ[zc] || 0) * (zc === 'regular' ? 0 : prices[zc] || 0);
@@ -1410,33 +1395,6 @@ export default function PlaneConfigurator({ onExit }) {
       ),
     [counts, prices]
   );
-
-  const priceInput = (zc, label) => (
-    <label style={ui.priceLbl} key={zc}>
-      <span>
-        <span style={{ ...ui.zoneDot, background: ZONE_COLORS[zc] }} />
-        {label}
-      </span>
-      <input
-        type="number" min="0" step="1" value={prices[zc]}
-        onChange={(e) =>
-          setPrices((p) => ({ ...p, [zc]: Number(e.target.value) || 0 }))
-        }
-        style={ui.priceInput}
-      />
-    </label>
-  );
-
-  const panelStyle = isNarrow
-    ? {
-        ...ui.panel,
-        ...ui.panelNarrow,
-        transform: panelOpen ? 'translateY(0)' : 'translateY(calc(100% + 30px))',
-      }
-    : {
-        ...ui.panel,
-        transform: panelOpen ? 'translateX(0)' : 'translateX(calc(100% + 30px))',
-      };
 
   const model = AIRCRAFT[params.aircraft] || AIRCRAFT.a320;
 
@@ -1462,18 +1420,26 @@ export default function PlaneConfigurator({ onExit }) {
       )}
 
       {!povUI && onExit && (
-        <button style={ui.exitBtn} title="Menú principal" aria-label="Volver al menú principal" onClick={onExit}>
+        <button
+          className="t3d-fab"
+          style={{ top: 14, left: 14 }}
+          title="Menú principal"
+          aria-label="Volver al menú principal"
+          onClick={onExit}
+        >
           <Ic size={18}>{icons.back}</Ic>
         </button>
       )}
 
       {!povUI && (
         <button
-          style={ui.homeBtn}
-          title="Vista de cabina (top)" aria-label="Volver a la vista cenital"
+          className="t3d-fab"
+          style={{ bottom: 16, left: 16 }}
+          title="Vista de cabina (top)"
+          aria-label="Volver a la vista cenital"
           onClick={() => T.current && T.current.goHome()}
         >
-          <Ic size={19}>{icons.home}</Ic>
+          <Ic size={18}>{icons.home}</Ic>
         </button>
       )}
 
@@ -1490,214 +1456,164 @@ export default function PlaneConfigurator({ onExit }) {
 
       {!povUI && (
         <button
-          style={{
-            ...ui.burgerBtn,
-            opacity: panelOpen ? 0 : 1,
-            pointerEvents: panelOpen ? 'none' : 'auto',
-          }}
+          className={`t3d-fab${panelOpen ? ' is-hidden' : ''}`}
+          style={{ top: 14, right: 14 }}
           aria-label="Abrir panel de configuración"
           aria-hidden={panelOpen}
           tabIndex={panelOpen ? -1 : 0}
           onClick={() => setPanelOpen(true)}
         >
-          <Ic size={20}>{icons.menu}</Ic>
+          <Ic size={18}>{icons.menu}</Ic>
         </button>
       )}
 
-      <div style={panelStyle}>
-        <div>
-          <div style={ui.panelHead}>
-            <strong style={{ letterSpacing: '.5px' }}>
-              TICKETING<span style={{ color: '#3b82f6' }}>3D</span> · Cabina{' '}
-              {model.label}
-            </strong>
-            <button style={ui.closeBtn} aria-label="Cerrar panel" onClick={() => setPanelOpen(false)}>
-              <Ic size={17}>{icons.x}</Ic>
-            </button>
-          </div>
+      {/* panel lateral estilo Apple */}
+      <Panel open={panelOpen} sheet={isNarrow} accent="#409cff" label="Configuración de la cabina">
+        <PanelHeader
+          title={`Cabina ${model.label}`}
+          subtitle="Flota low-cost · zonas Space"
+          onClose={() => setPanelOpen(false)}
+        />
+        <div className="t3d-scroll">
+          <Section label="Avión" plain>
+            <Segmented
+              label="Modelo de avión"
+              value={params.aircraft}
+              onChange={(id2) => setParams((p) => ({ ...p, aircraft: id2 }))}
+              options={Object.entries(AIRCRAFT).map(([id2, m2]) => ({ value: id2, label: m2.label }))}
+            />
+          </Section>
 
-          {/* selector de avión de la flota */}
-          <div style={ui.fleetRow}>
-            {Object.entries(AIRCRAFT).map(([id2, m2]) => (
-              <button
-                key={id2}
-                onClick={() => setParams((p) => ({ ...p, aircraft: id2 }))}
-                style={{
-                  ...ui.fleetBtn,
-                  background:
-                    params.aircraft === id2 ? '#1d4ed8' : 'rgba(255,255,255,.06)',
-                  borderColor:
-                    params.aircraft === id2 ? '#1d4ed8' : 'rgba(255,255,255,.15)',
-                  color: params.aircraft === id2 ? '#fff' : '#c9c6cf',
-                }}
-              >
-                {m2.label}
-              </button>
-            ))}
-          </div>
+          <Section>
+            <Stats
+              items={[
+                { label: 'Libres', value: libres, color: '#aeaeb2' },
+                { label: 'Selecc.', value: counts.sel, color: '#30d158' },
+                { label: 'Bloq.', value: counts.blocked, color: '#636366' },
+                { label: 'Vendidos', value: counts.sold, color: '#ffd60a' },
+              ]}
+            />
+          </Section>
 
-          <div style={ui.counters}>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#7ce38b' }}>{libres}</div>
-              <div style={ui.counterLbl}>Libres</div>
-            </div>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#4ade80' }}>{counts.sel}</div>
-              <div style={ui.counterLbl}>Selecc.</div>
-            </div>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#9a95a3' }}>{counts.blocked}</div>
-              <div style={ui.counterLbl}>Bloq.</div>
-            </div>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#c9a145' }}>{counts.sold}</div>
-              <div style={ui.counterLbl}>Vendidos</div>
-            </div>
-          </div>
-
-          <div style={ui.revenue}>
-            <span>
-              Ingresos asientos:{' '}
-              <b style={{ color: '#7ce38b' }}>{revenue.toFixed(2)} €</b>
-            </span>
-            <span style={{ opacity: 0.6 }}>
-              potencial {potential.toFixed(0)} €
-            </span>
-          </div>
-
-          {/* precios por zona tarifaria */}
-          <div style={ui.priceGrid}>
-            {priceInput('one', 'Space One')}
-            {priceInput('plus', 'Space Plus')}
-            {priceInput('space', 'Space (salida)')}
-            {priceInput('front', 'Delant./tras.')}
-          </div>
-          <div style={ui.zoneNote}>
-            <span style={{ ...ui.zoneDot, background: ZONE_COLORS.regular }} />
-            Regular: incluido en la tarifa · sin fila 13, como en los aviones
-            reales
-          </div>
-
-          <div style={ui.buyBox}>
-            <div style={ui.buyHead}>
-              <Ic style={{ marginRight: 6 }}>{icons.ticket}</Ic>
-              Viajamos juntos
-            </div>
-            <div style={ui.buyRow}>
-              <input
-                type="number" min="1" max="3" value={buyN}
-                onChange={(e) =>
-                  setBuyN(Math.max(1, Math.min(3, Number(e.target.value) || 1)))
-                }
-                style={ui.buyInput}
+          <Section
+            label="Precios por zona"
+            footnote="Regular va incluido en la tarifa. Sin fila 13, como en los aviones reales."
+          >
+            <Row label="Ingresos por asientos" detail={fmtEUR(revenue)} strong />
+            <Row label="Avión lleno" detail={fmtEUR(potential)} />
+            {[
+              ['one', 'Space One'],
+              ['plus', 'Space Plus'],
+              ['space', 'Space · salida'],
+              ['front', 'Delanteros y traseros'],
+            ].map(([zc, label]) => (
+              <NumberRow
+                key={zc}
+                label={label}
+                dot={ZONE_COLORS[zc]}
+                value={prices[zc]}
+                onChange={(v) => setPrices((p) => ({ ...p, [zc]: v }))}
               />
-              <select
-                value={buyPref}
-                onChange={(e) => setBuyPref(e.target.value)}
-                style={ui.buySelect}
-              >
-                <option value="best">Mejores asientos</option>
-                <option value="cheap">Sin coste (Regular)</option>
-              </select>
-              <button onClick={proposeSeats} style={ui.buyBtn}>
-                Sugerir
-              </button>
-            </div>
-            {proposal && (
-              <div style={ui.proposalBox}>
-                {proposal.keys.length ? (
-                  <>
-                    <div style={{ marginBottom: 6 }}>
-                      <b style={{ color: '#34d399' }}>{proposal.label}</b>
-                      {' · '}
-                      {proposal.total.toFixed(2)} €
-                    </div>
-                    <div style={{ display: 'flex', gap: 7 }}>
-                      <button onClick={confirmProposal} style={ui.confirmBtn}>
-                        Confirmar venta
-                      </button>
-                      <button onClick={clearProposal} style={ui.cancelBtn}>
-                        Cancelar
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ opacity: 0.75 }}>{proposal.label}</div>
-                )}
+            ))}
+          </Section>
+
+          <Section label="Viajamos juntos">
+            <Row label="Pasajeros">
+              <Stepper value={buyN} min={1} max={3} onChange={setBuyN} label="Número de pasajeros" />
+            </Row>
+            <div className="t3d-row">
+              <div style={{ flex: 1 }}>
+                <Segmented
+                  label="Criterio"
+                  value={buyPref}
+                  onChange={setBuyPref}
+                  options={[
+                    { value: 'best', label: 'Mejores' },
+                    { value: 'cheap', label: 'Sin coste' },
+                  ]}
+                />
               </div>
+            </div>
+            <RowButton onClick={proposeSeats}>
+              <Ic>{icons.ticket}</Ic>
+              Sugerir asientos
+            </RowButton>
+            {proposal && (
+              proposal.keys.length ? (
+                <>
+                  <Row label={proposal.label} detail={fmtEUR(proposal.total)} strong />
+                  <div className="t3d-row" style={{ justifyContent: 'flex-end', gap: 16 }}>
+                    <button className="t3d-link" onClick={clearProposal}>Cancelar</button>
+                    <button className="t3d-btn is-primary is-small" onClick={confirmProposal}>
+                      Confirmar venta
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <Row label={proposal.label} />
+              )
             )}
-          </div>
+          </Section>
 
-          <div style={ui.row}>
-            <div style={ui.rowTop}>
-              <span>Pitch base</span>
-              <span style={ui.value}>{params.pitch} m</span>
-            </div>
-            <input
-              type="range" min="0.71" max="0.92" step="0.01"
+          <Section
+            label="Al tocar un asiento"
+            plain
+            footnote="Arrastra para pintar varios asientos a la vez."
+          >
+            <Segmented
+              label="Acción al tocar un asiento"
+              value={mode === 'pov' ? null : mode}
+              onChange={setMode}
+              options={[
+                { value: 'sel', label: 'Seleccionar' },
+                { value: 'block', label: 'Bloquear' },
+                { value: 'clear', label: 'Normal' },
+              ]}
+            />
+            <div style={{ height: 8 }} />
+            <button
+              className="t3d-btn"
+              aria-pressed={mode === 'pov'}
+              onClick={() => setMode(mode === 'pov' ? 'sel' : 'pov')}
+            >
+              <Ic>{icons.eye}</Ic>
+              Ver desde el asiento
+            </button>
+          </Section>
+
+          <Section label="Cabina">
+            <SliderRow
+              label="Pitch base"
               value={params.pitch}
-              onChange={(e) =>
-                setParams((p) => ({ ...p, pitch: Number(e.target.value) }))
-              }
-              style={ui.range}
+              unit=" m"
+              min={0.71}
+              max={0.92}
+              step={0.01}
+              onChange={(v) => setParams((p) => ({ ...p, pitch: v }))}
             />
-          </div>
-          <div style={ui.row}>
-            <div style={ui.rowTop}>
-              <span>Ocupación simulada</span>
-              <span style={ui.value}>{params.occupancy}%</span>
-            </div>
-            <input
-              type="range" min="0" max="100" step="1"
+            <SliderRow
+              label="Ocupación simulada"
               value={params.occupancy}
-              onChange={(e) =>
-                setParams((p) => ({ ...p, occupancy: Number(e.target.value) }))
-              }
-              style={ui.range}
+              unit="%"
+              min={0}
+              max={100}
+              step={1}
+              onChange={(v) => setParams((p) => ({ ...p, occupancy: v }))}
             />
-          </div>
+          </Section>
 
-          <div style={ui.modesLbl}>
-            Al tocar un asiento (arrastra para pintar varios):
-          </div>
-          <div style={ui.modes}>
-            {modeBtn('sel', 'Seleccionar', '#1f9d55')}
-            {modeBtn('block', 'Bloquear', '#4d4956')}
-            {modeBtn('clear', 'Normal', '#4a5568')}
-          </div>
-          <button
-            onClick={() => setMode('pov')}
-            style={{
-              ...ui.povBtn,
-              background: mode === 'pov' ? '#1d4ed8' : 'rgba(255,255,255,.06)',
-              borderColor: mode === 'pov' ? '#1d4ed8' : 'rgba(255,255,255,.15)',
-            }}
+          <Section
+            label="Herramientas"
+            plain
+            footnote="Arrastra para orbitar · rueda o pellizco para el zoom. La vista superior es tu plano de asientos."
           >
-            <Ic style={{ marginRight: 7 }}>{icons.eye}</Ic>
-            Ver desde el asiento
-          </button>
-          <button
-            onClick={() => setWingView((v) => !v)}
-            style={{
-              ...ui.povBtn,
-              background: wingView ? '#7048e8' : 'rgba(255,255,255,.06)',
-              borderColor: wingView ? '#7048e8' : 'rgba(255,255,255,.15)',
-            }}
-          >
-            <Ic style={{ marginRight: 7 }}>{icons.wing}</Ic>
-            ¿Me toca ala? — calidad de ventanilla
-          </button>
-          <button onClick={resetAll} style={ui.resetBtn}>
-            <Ic style={{ marginRight: 7 }}>{icons.trash}</Ic>
-            Reiniciar cabina
-          </button>
-
-          <div style={ui.help}>
-            Arrastra para orbitar · rueda/pellizco para zoom · el fuselaje se ve
-            por dentro: la vista superior es tu plano de asientos
-          </div>
+            <div className="t3d-tiles">
+              <Tile icon={icons.wing} label="¿Me toca ala?" active={wingView} onClick={() => setWingView((v) => !v)} />
+              <Tile icon={icons.trash} label="Reiniciar" onClick={resetAll} />
+            </div>
+          </Section>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }
@@ -1706,285 +1622,32 @@ export default function PlaneConfigurator({ onExit }) {
 // estilos (drawer glassmorphism, acento azul #3b82f6)
 // ----------------------------------------------------------------------------
 const ui = {
-  panel: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: 'min(340px, calc(100vw - 20px))',
-    overflowY: 'auto',
-    background: 'rgba(13,17,28,.82)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    borderLeft: '1px solid rgba(255,255,255,.12)',
-    padding: '16px 16px 14px',
-    color: '#e8e6ec',
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-    fontSize: 13,
-    boxShadow: '-12px 0 44px rgba(0,0,0,.4)',
-    transition: 'transform .38s cubic-bezier(.22, 1, .36, 1)',
-    willChange: 'transform',
-  },
-  panelNarrow: {
-    top: 'auto',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '58%',
-    borderLeft: 'none',
-    borderTop: '1px solid rgba(255,255,255,.12)',
-    borderRadius: '16px 16px 0 0',
-    boxShadow: '0 -12px 44px rgba(0,0,0,.4)',
-  },
-  panelHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    fontSize: 13.5,
-  },
-  closeBtn: { background: 'none', border: 'none', color: '#9a95a3', cursor: 'pointer', padding: 4 },
-  fleetRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 10 },
-  fleetBtn: {
-    padding: '9px 4px',
-    borderRadius: 9,
-    border: '1px solid',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 700,
-  },
-  counters: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginBottom: 10 },
-  counter: {
-    border: '1px solid rgba(255,255,255,.14)',
-    borderRadius: 10,
-    padding: '7px 2px',
-    textAlign: 'center',
-    background: 'rgba(255,255,255,.04)',
-  },
-  counterNum: { fontSize: 17, fontWeight: 700, lineHeight: 1.1 },
-  counterLbl: { fontSize: 10, opacity: 0.65, marginTop: 2 },
-  revenue: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    fontSize: 12.5,
-    marginBottom: 8,
-    padding: '7px 10px',
-    borderRadius: 9,
-    background: 'rgba(255,255,255,.04)',
-    border: '1px solid rgba(255,255,255,.1)',
-  },
-  priceGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 6 },
-  priceLbl: { fontSize: 11, opacity: 0.9, display: 'flex', flexDirection: 'column', gap: 4 },
-  priceInput: {
-    width: '100%',
-    padding: '6px 8px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#e8e6ec',
-    fontSize: 13,
-  },
-  zoneDot: {
-    display: 'inline-block',
-    width: 9,
-    height: 9,
-    borderRadius: '50%',
-    marginRight: 6,
-    verticalAlign: '-1px',
-  },
-  zoneNote: { fontSize: 10.5, opacity: 0.6, marginBottom: 10, lineHeight: 1.5 },
-  buyBox: {
-    border: '1px solid rgba(59,130,246,.4)',
-    borderRadius: 10,
-    padding: '10px 10px 9px',
-    marginBottom: 12,
-    background: 'rgba(59,130,246,.07)',
-  },
-  buyHead: { fontSize: 12.5, fontWeight: 600, marginBottom: 8 },
-  buyRow: { display: 'flex', gap: 7 },
-  buyInput: {
-    width: 46,
-    padding: '7px 6px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#e8e6ec',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  buySelect: {
-    flex: 1,
-    padding: '7px 6px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(20,26,40,.9)',
-    color: '#e8e6ec',
-    fontSize: 12.5,
-  },
-  buyBtn: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: '1px solid rgba(59,130,246,.55)',
-    background: 'rgba(59,130,246,.18)',
-    color: '#bfdbfe',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-  },
-  proposalBox: {
-    marginTop: 9,
-    fontSize: 12.5,
-    padding: '8px 9px',
-    borderRadius: 8,
-    background: 'rgba(255,255,255,.05)',
-  },
-  confirmBtn: {
-    flex: 1,
-    padding: '8px 4px',
-    borderRadius: 8,
-    border: '1px solid #1f9d55',
-    background: '#1f9d55',
-    color: '#fff',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-  },
-  cancelBtn: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.2)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#c9c6cf',
-    cursor: 'pointer',
-    fontSize: 12.5,
-  },
-  row: { marginBottom: 9 },
-  rowTop: { display: 'flex', justifyContent: 'space-between', marginBottom: 3, opacity: 0.9 },
-  value: { color: '#93c5fd', fontVariantNumeric: 'tabular-nums' },
-  range: { width: '100%', accentColor: '#3b82f6', margin: 0 },
-  modesLbl: { fontSize: 11, opacity: 0.65, marginBottom: 6, lineHeight: 1.45 },
-  modes: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7, marginBottom: 8 },
-  modeBtn: {
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid',
-    cursor: 'pointer',
-    fontSize: 12,
-    fontWeight: 600,
-    transition: 'all .15s',
-  },
-  povBtn: {
-    width: '100%',
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid',
-    color: '#fff',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
-  resetBtn: {
-    width: '100%',
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#c9c6cf',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
-  help: {
-    fontSize: 11,
-    opacity: 0.55,
-    lineHeight: 1.5,
-    borderTop: '1px solid rgba(255,255,255,.1)',
-    paddingTop: 8,
-  },
-  burgerBtn: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.25)',
-    background: 'rgba(13,17,28,.6)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#fff',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.35)',
-    transition: 'opacity .25s',
-  },
-  homeBtn: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.25)',
-    background: 'rgba(13,17,28,.6)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#fff',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.35)',
-  },
-  exitBtn: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.25)',
-    background: 'rgba(13,17,28,.6)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#fff',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.35)',
-  },
   minimap: {
     position: 'absolute',
     bottom: 16,
     left: 72,
-    borderRadius: 10,
-    border: '1px solid rgba(255,255,255,.2)',
-    background: 'rgba(13,17,28,.68)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
+    borderRadius: 14,
+    border: '0.5px solid rgba(255,255,255,.16)',
+    background: 'rgba(30,30,32,.5)',
+    backdropFilter: 'blur(30px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(30px) saturate(180%)',
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.35)',
   },
   povHint: {
+    WebkitBackdropFilter: 'blur(30px) saturate(180%)',
     position: 'absolute',
     top: 12,
     left: '50%',
     transform: 'translateX(-50%)',
-    background: 'rgba(13,17,28,.8)',
-    backdropFilter: 'blur(10px)',
+    background: 'rgba(30,30,32,.62)',
+    backdropFilter: 'blur(30px) saturate(180%)',
     border: '1px solid rgba(255,255,255,.2)',
     borderRadius: 999,
     padding: '8px 18px',
     color: '#fff',
     fontSize: 12.5,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     maxWidth: 'calc(100vw - 24px)',
     overflow: 'hidden',
@@ -2003,7 +1666,7 @@ const ui = {
     fontSize: 14,
     fontWeight: 600,
     cursor: 'pointer',
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     boxShadow: '0 8px 30px rgba(0,0,0,.35)',
     display: 'flex',
     alignItems: 'center',
@@ -2012,13 +1675,13 @@ const ui = {
     position: 'absolute',
     display: 'none',
     pointerEvents: 'none',
-    background: 'rgba(13,17,28,.92)',
+    background: 'rgba(30,30,32,.62)',
     border: '1px solid rgba(59,130,246,.5)',
     borderRadius: 8,
     padding: '5px 10px',
     color: '#e8e6ec',
     fontSize: 12,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     zIndex: 10,
   },
@@ -2034,7 +1697,7 @@ const ui = {
     color: '#a7f3d0',
     fontSize: 12.5,
     fontWeight: 600,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     zIndex: 9,
   },

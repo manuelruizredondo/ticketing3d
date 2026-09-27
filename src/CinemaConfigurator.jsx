@@ -6,7 +6,8 @@ import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
-  Ic, icons,
+  Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
+  SliderRow, Segmented, Switch, Stepper, NumberRow, Tile,
 } from './shared.jsx';
 
 // ============================================================================
@@ -1876,48 +1877,7 @@ export default function CinemaConfigurator({ onExit }) {
     a.click();
   };
 
-  const setP = (k) => (e) =>
-    setParams((p) => ({
-      ...p,
-      [k]: k === 'aisle' ? e.target.checked : Number(e.target.value),
-    }));
-
-  const slider = (label, key, min, max, step, unit = '') => (
-    <div style={ui.row} key={key}>
-      <div style={ui.rowTop}>
-        <span>{label}</span>
-        <span style={ui.value}>
-          {params[key]}
-          {unit}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={params[key]}
-        onChange={setP(key)}
-        style={ui.range}
-      />
-    </div>
-  );
-
-  const modeBtn = (m, label, color) => (
-    <button
-      key={m}
-      aria-pressed={mode === m}
-      onClick={() => setMode(m)}
-      style={{
-        ...ui.modeBtn,
-        background: mode === m ? color : 'rgba(255,255,255,.06)',
-        borderColor: mode === m ? color : 'rgba(255,255,255,.15)',
-        color: mode === m ? '#fff' : '#c9c6cf',
-      }}
-    >
-      {label}
-    </button>
-  );
+  const setP = (k) => (v) => setParams((p) => ({ ...p, [k]: v }));
 
   const libres = counts.total - counts.blocked - counts.sold;
   const revenue =
@@ -1932,17 +1892,6 @@ export default function CinemaConfigurator({ onExit }) {
     }
     return sum;
   }, [counts, priceOf]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const panelStyle = isNarrow
-    ? {
-        ...ui.panel,
-        ...ui.panelNarrow,
-        transform: panelOpen ? 'translateY(0)' : 'translateY(calc(100% + 30px))',
-      }
-    : {
-        ...ui.panel,
-        transform: panelOpen ? 'translateX(0)' : 'translateX(calc(100% + 30px))',
-      };
 
   return (
     <div style={{ position: 'fixed', inset: 0, userSelect: 'none' }}>
@@ -1979,7 +1928,13 @@ export default function CinemaConfigurator({ onExit }) {
 
       {/* salir al menú principal (arriba izquierda) */}
       {!povUI && onExit && (
-        <button style={ui.exitBtn} title="Menú principal" aria-label="Volver al menú principal" onClick={onExit}>
+        <button
+          className="t3d-fab"
+          style={{ top: 14, left: 14 }}
+          title="Menú principal"
+          aria-label="Volver al menú principal"
+          onClick={onExit}
+        >
           <Ic size={18}>{icons.back}</Ic>
         </button>
       )}
@@ -1987,11 +1942,13 @@ export default function CinemaConfigurator({ onExit }) {
       {/* vista top / posición original (abajo izquierda) */}
       {!povUI && (
         <button
-          style={ui.homeBtn}
-          title="Vista general (top)" aria-label="Volver a la vista cenital"
+          className="t3d-fab"
+          style={{ bottom: 16, left: 16 }}
+          title="Vista general (top)"
+          aria-label="Volver a la vista cenital"
           onClick={() => T.current && T.current.goHome()}
         >
-          <Ic size={19}>{icons.home}</Ic>
+          <Ic size={18}>{icons.home}</Ic>
         </button>
       )}
 
@@ -2007,234 +1964,146 @@ export default function CinemaConfigurator({ onExit }) {
         }}
       />
 
-      {/* hamburguesa (cuando el editor está cerrado) */}
+      {/* hamburguesa (cuando el panel está cerrado) */}
       {!povUI && (
         <button
-          style={{
-            ...ui.burgerBtn,
-            opacity: panelOpen ? 0 : 1,
-            pointerEvents: panelOpen ? 'none' : 'auto',
-          }}
+          className={`t3d-fab${panelOpen ? ' is-hidden' : ''}`}
+          style={{ top: 14, right: 14 }}
           aria-label="Abrir panel de configuración"
           aria-hidden={panelOpen}
           tabIndex={panelOpen ? -1 : 0}
           onClick={() => setPanelOpen(true)}
         >
-          <Ic size={20}>{icons.menu}</Ic>
+          <Ic size={18}>{icons.menu}</Ic>
         </button>
       )}
 
-      {/* panel de configuración: drawer lateral animado */}
-      <div style={panelStyle}>
-        <div>
-          <div style={ui.panelHead}>
-            <strong style={{ letterSpacing: '.5px' }}>
-              CINEMES <span style={{ color: '#d8232a' }}>FULL HD</span> · Sala 3D
-            </strong>
-            <button style={ui.closeBtn} aria-label="Cerrar panel" onClick={() => setPanelOpen(false)}>
-              <Ic size={17}>{icons.x}</Ic>
-            </button>
-          </div>
-
-          <div style={ui.counters}>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#7ce38b' }}>{libres}</div>
-              <div style={ui.counterLbl}>Libres</div>
-            </div>
-            <div style={{ ...ui.counter, borderColor: 'rgba(216,35,42,.5)' }}>
-              <div style={{ ...ui.counterNum, color: '#ff5a60' }}>{counts.vip}</div>
-              <div style={ui.counterLbl}>VIP</div>
-            </div>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#9a95a3' }}>
-                {counts.blocked}
-              </div>
-              <div style={ui.counterLbl}>Bloq.</div>
-            </div>
-            <div style={ui.counter}>
-              <div style={{ ...ui.counterNum, color: '#c9a145' }}>{counts.sold}</div>
-              <div style={ui.counterLbl}>Vendidas</div>
-            </div>
-          </div>
-
-          {/* recaudación */}
-          <div style={ui.revenue}>
-            <span>
-              Recaudación: <b style={{ color: '#7ce38b' }}>{revenue.toFixed(2)} €</b>
-            </span>
-            <span style={{ opacity: 0.6 }}>
-              aforo completo {potential.toFixed(0)} €
-            </span>
-          </div>
-          <div style={ui.priceRow}>
-            <label style={ui.priceLbl}>
-              Precio estándar
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={prices.std}
-                onChange={(e) =>
-                  setPrices((p) => ({ ...p, std: Number(e.target.value) || 0 }))
-                }
-                style={ui.priceInput}
-              />
-            </label>
-            <label style={ui.priceLbl}>
-              Precio VIP
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={prices.vip}
-                onChange={(e) =>
-                  setPrices((p) => ({ ...p, vip: Number(e.target.value) || 0 }))
-                }
-                style={ui.priceInput}
-              />
-            </label>
-          </div>
-
-          {/* compra de entradas */}
-          <div style={ui.buyBox}>
-            <div style={ui.buyHead}>
-              <Ic style={{ marginRight: 6 }}>{icons.ticket}</Ic>
-              Comprar entradas
-            </div>
-            <div style={ui.buyRow}>
-              <input
-                type="number"
-                min="1"
-                max="8"
-                value={buyN}
-                onChange={(e) =>
-                  setBuyN(Math.max(1, Math.min(8, Number(e.target.value) || 1)))
-                }
-                style={ui.buyInput}
-              />
-              <button onClick={proposeSeats} style={ui.buyBtn}>
-                Sugerir mejores asientos
-              </button>
-            </div>
-            {proposal && (
-              <div style={ui.proposalBox}>
-                {proposal.keys.length ? (
-                  <>
-                    <div style={{ marginBottom: 6 }}>
-                      <b style={{ color: '#34d399' }}>{proposal.label}</b>
-                      {' · '}
-                      {proposal.total.toFixed(2)} €
-                    </div>
-                    <div style={{ display: 'flex', gap: 7 }}>
-                      <button onClick={confirmProposal} style={ui.confirmBtn}>
-                        Confirmar venta
-                      </button>
-                      <button onClick={clearProposal} style={ui.cancelBtn}>
-                        Cancelar
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ opacity: 0.75 }}>{proposal.label}</div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {slider('Filas', 'rows', 3, 24, 1)}
-          {slider('Butacas por fila', 'cols', 6, 32, 1)}
-          {slider('Filas VIP traseras', 'vipRows', 0, 6, 1)}
-          {slider('Curvatura', 'curvature', 0, 100, 1, '%')}
-          {slider('Pendiente', 'slope', 0, 0.6, 0.01, ' m/fila')}
-          {slider('Separación', 'spacing', 0.68, 1.0, 0.01, ' m')}
-          {slider('Ocupación simulada', 'occupancy', 0, 100, 1, '%')}
-          {slider('Ancho pantalla', 'screenWPct', 40, 100, 1, '%')}
-          {slider('Alto pantalla', 'screenH', 2, 8.2, 0.1, ' m')}
-
-          <label style={ui.checkRow}>
-            <input
-              type="checkbox"
-              checked={params.aisle}
-              onChange={setP('aisle')}
-              style={{ accentColor: '#d8232a' }}
+      {/* panel lateral estilo Apple */}
+      <Panel open={panelOpen} sheet={isNarrow} accent="#ff453a" label="Configuración de la sala">
+        <PanelHeader
+          title="Sala de cine"
+          subtitle="Cinemes Full HD · Centre Splau"
+          onClose={() => setPanelOpen(false)}
+        />
+        <div className="t3d-scroll">
+          <Section>
+            <Stats
+              items={[
+                { label: 'Libres', value: libres, color: '#30d158' },
+                { label: 'VIP', value: counts.vip, color: '#ff453a' },
+                { label: 'Bloq.', value: counts.blocked, color: '#8e8e93' },
+                { label: 'Vendidas', value: counts.sold, color: '#ffd60a' },
+              ]}
             />
-            Pasillo central
-          </label>
+          </Section>
 
-          <div style={ui.modesLbl}>
-            Al tocar una butaca (arrastra para pintar varias · toca el número de
-            fila para marcarla entera):
-          </div>
-          <div style={ui.modes}>
-            {modeBtn('vip', 'VIP', '#d8232a')}
-            {modeBtn('block', 'Bloquear', '#4d4956')}
-            {modeBtn('clear', 'Normal', '#2e6b46')}
-          </div>
-          <button
-            onClick={() => setMode('pov')}
-            style={{
-              ...ui.povBtn,
-              background: mode === 'pov' ? '#1d4ed8' : 'rgba(255,255,255,.06)',
-              borderColor: mode === 'pov' ? '#1d4ed8' : 'rgba(255,255,255,.15)',
-            }}
+          <Section label="Taquilla">
+            <Row label="Recaudación" detail={fmtEUR(revenue)} strong />
+            <Row label="Aforo completo" detail={fmtEUR(potential)} />
+            <NumberRow
+              label="Precio estándar"
+              value={prices.std}
+              step={0.5}
+              onChange={(v) => setPrices((p) => ({ ...p, std: v }))}
+            />
+            <NumberRow
+              label="Precio VIP"
+              dot="#ff453a"
+              value={prices.vip}
+              step={0.5}
+              onChange={(v) => setPrices((p) => ({ ...p, vip: v }))}
+            />
+          </Section>
+
+          <Section label="Comprar entradas">
+            <Row label="Entradas">
+              <Stepper value={buyN} min={1} max={8} onChange={setBuyN} label="Número de entradas" />
+            </Row>
+            <RowButton onClick={proposeSeats}>
+              <Ic>{icons.ticket}</Ic>
+              Sugerir mejores asientos
+            </RowButton>
+            {proposal && (
+              proposal.keys.length ? (
+                <>
+                  <Row label={proposal.label} detail={fmtEUR(proposal.total)} strong />
+                  <div className="t3d-row" style={{ justifyContent: 'flex-end', gap: 16 }}>
+                    <button className="t3d-link" onClick={clearProposal}>Cancelar</button>
+                    <button className="t3d-btn is-primary is-small" onClick={confirmProposal}>
+                      Confirmar venta
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <Row label={proposal.label} />
+              )
+            )}
+          </Section>
+
+          <Section
+            label="Al tocar una butaca"
+            plain
+            footnote="Arrastra para pintar varias · toca el número de fila para marcarla entera."
           >
-            <Ic style={{ marginRight: 7 }}>{icons.eye}</Ic>
-            Ver desde la butaca
-          </button>
+            <Segmented
+              label="Acción al tocar una butaca"
+              value={mode === 'pov' ? null : mode}
+              onChange={setMode}
+              options={[
+                { value: 'vip', label: 'VIP' },
+                { value: 'block', label: 'Bloquear' },
+                { value: 'clear', label: 'Normal' },
+              ]}
+            />
+            <div style={{ height: 8 }} />
+            <button
+              className="t3d-btn"
+              aria-pressed={mode === 'pov'}
+              onClick={() => setMode(mode === 'pov' ? 'vip' : 'pov')}
+            >
+              <Ic>{icons.eye}</Ic>
+              Ver desde la butaca
+            </button>
+          </Section>
 
-          <div style={ui.toolRow}>
-            <button
-              onClick={() => setHeatOn((v) => !v)}
-              style={{
-                ...ui.toolBtn,
-                background: heatOn ? '#7048e8' : 'rgba(255,255,255,.06)',
-                borderColor: heatOn ? '#7048e8' : 'rgba(255,255,255,.15)',
-                color: heatOn ? '#fff' : '#c9c6cf',
-              }}
-            >
-              <Ic style={{ marginRight: 6 }}>{icons.target}</Ic>
-              Mapa de visión
-            </button>
-            <button onClick={toggleSound} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{muted ? icons.volOff : icons.volOn}</Ic>
-              {muted ? 'Sonido' : 'Silenciar'}
-            </button>
-          </div>
-          <div style={ui.toolRow}>
-            <button
-              onClick={() => T.current && T.current.startTour()}
-              style={ui.toolBtn}
-            >
-              <Ic style={{ marginRight: 6 }}>{icons.play}</Ic>
-              Recorrido
-            </button>
-            <button onClick={takeSnapshot} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.camera}</Ic>
-              Captura
-            </button>
-          </div>
-          <div style={ui.toolRow}>
-            <button onClick={undo} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.undo}</Ic>
-              Deshacer
-            </button>
-            <button onClick={redo} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.redo}</Ic>
-              Rehacer
-            </button>
-          </div>
-          <div style={ui.toolRow}>
-            <button onClick={exportConfig} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.download}</Ic>
-              Exportar
-            </button>
-            <button
-              onClick={() => fileRef.current && fileRef.current.click()}
-              style={ui.toolBtn}
-            >
-              <Ic style={{ marginRight: 6 }}>{icons.upload}</Ic>
-              Importar
-            </button>
+          <Section label="Sala">
+            <SliderRow label="Filas" value={params.rows} min={3} max={24} step={1} onChange={setP('rows')} />
+            <SliderRow label="Butacas por fila" value={params.cols} min={6} max={32} step={1} onChange={setP('cols')} />
+            <SliderRow label="Filas VIP traseras" value={params.vipRows} min={0} max={6} step={1} onChange={setP('vipRows')} />
+            <SliderRow label="Curvatura" value={params.curvature} unit="%" min={0} max={100} step={1} onChange={setP('curvature')} />
+            <SliderRow label="Pendiente" value={params.slope} unit=" m/fila" min={0} max={0.6} step={0.01} onChange={setP('slope')} />
+            <SliderRow label="Separación" value={params.spacing} unit=" m" min={0.68} max={1} step={0.01} onChange={setP('spacing')} />
+            <Row label="Pasillo central">
+              <Switch checked={params.aisle} onChange={setP('aisle')} label="Pasillo central" />
+            </Row>
+          </Section>
+
+          <Section label="Pantalla">
+            <SliderRow label="Ancho" value={params.screenWPct} unit="%" min={40} max={100} step={1} onChange={setP('screenWPct')} />
+            <SliderRow label="Alto" value={params.screenH} unit=" m" min={2} max={8.2} step={0.1} onChange={setP('screenH')} />
+          </Section>
+
+          <Section label="Simulación">
+            <SliderRow label="Ocupación" value={params.occupancy} unit="%" min={0} max={100} step={1} onChange={setP('occupancy')} />
+          </Section>
+
+          <Section
+            label="Herramientas"
+            plain
+            footnote="Arrastra para orbitar · rueda o pellizco para el zoom · Ctrl+Z deshace."
+          >
+            <div className="t3d-tiles">
+              <Tile icon={icons.target} label="Mapa de visión" active={heatOn} onClick={() => setHeatOn((v) => !v)} />
+              <Tile icon={muted ? icons.volOff : icons.volOn} label="Sonido" active={!muted} onClick={toggleSound} />
+              <Tile icon={icons.play} label="Recorrido" onClick={() => T.current && T.current.startTour()} />
+              <Tile icon={icons.camera} label="Captura" onClick={takeSnapshot} />
+              <Tile icon={icons.undo} label="Deshacer" onClick={undo} />
+              <Tile icon={icons.redo} label="Rehacer" onClick={redo} />
+              <Tile icon={icons.download} label="Exportar" onClick={exportConfig} />
+              <Tile icon={icons.upload} label="Importar" onClick={() => fileRef.current && fileRef.current.click()} />
+              <Tile icon={icons.share} label={shareMsg || 'Compartir'} onClick={shareLink} />
+              <Tile icon={icons.trash} label="Reiniciar" onClick={resetAll} />
+            </div>
             <input
               ref={fileRef}
               type="file"
@@ -2242,24 +2111,9 @@ export default function CinemaConfigurator({ onExit }) {
               onChange={importConfig}
               style={{ display: 'none' }}
             />
-          </div>
-          <div style={ui.toolRow}>
-            <button onClick={shareLink} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.share}</Ic>
-              {shareMsg || 'Compartir'}
-            </button>
-            <button onClick={resetAll} style={ui.toolBtn}>
-              <Ic style={{ marginRight: 6 }}>{icons.trash}</Ic>
-              Reiniciar
-            </button>
-          </div>
-
-          <div style={ui.help}>
-            Arrastra para orbitar · rueda/pellizco para zoom · toca una butaca
-            para marcarla · Ctrl+Z deshace
-          </div>
+          </Section>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }
@@ -2268,302 +2122,32 @@ export default function CinemaConfigurator({ onExit }) {
 // estilos (drawer glassmorphism, acento rojo #d8232a en los controles)
 // ----------------------------------------------------------------------------
 const ui = {
-  panel: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: 'min(340px, calc(100vw - 20px))',
-    overflowY: 'auto',
-    background: 'rgba(16,14,20,.78)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    borderLeft: '1px solid rgba(255,255,255,.1)',
-    padding: '16px 16px 14px',
-    color: '#e8e6ec',
-    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-    fontSize: 13,
-    boxShadow: '-12px 0 44px rgba(0,0,0,.5)',
-    transition: 'transform .38s cubic-bezier(.22, 1, .36, 1)',
-    willChange: 'transform',
-  },
-  panelNarrow: {
-    top: 'auto',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '58%',
-    borderLeft: 'none',
-    borderTop: '1px solid rgba(255,255,255,.1)',
-    borderRadius: '16px 16px 0 0',
-    boxShadow: '0 -12px 44px rgba(0,0,0,.5)',
-  },
-  panelHead: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    fontSize: 13.5,
-  },
-  closeBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#9a95a3',
-    cursor: 'pointer',
-    padding: 4,
-  },
-  counters: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr 1fr',
-    gap: 6,
-    marginBottom: 10,
-  },
-  counter: {
-    border: '1px solid rgba(255,255,255,.14)',
-    borderRadius: 10,
-    padding: '7px 2px',
-    textAlign: 'center',
-    background: 'rgba(255,255,255,.04)',
-  },
-  counterNum: { fontSize: 17, fontWeight: 700, lineHeight: 1.1 },
-  counterLbl: { fontSize: 10, opacity: 0.65, marginTop: 2 },
-  revenue: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    fontSize: 12.5,
-    marginBottom: 8,
-    padding: '7px 10px',
-    borderRadius: 9,
-    background: 'rgba(255,255,255,.04)',
-    border: '1px solid rgba(255,255,255,.1)',
-  },
-  priceRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 7,
-    marginBottom: 10,
-  },
-  priceLbl: {
-    fontSize: 11,
-    opacity: 0.85,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-  },
-  priceInput: {
-    width: '100%',
-    padding: '6px 8px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#e8e6ec',
-    fontSize: 13,
-  },
-  buyBox: {
-    border: '1px solid rgba(52,211,153,.35)',
-    borderRadius: 10,
-    padding: '10px 10px 9px',
-    marginBottom: 12,
-    background: 'rgba(52,211,153,.05)',
-  },
-  buyHead: { fontSize: 12.5, fontWeight: 600, marginBottom: 8 },
-  buyRow: { display: 'flex', gap: 7 },
-  buyInput: {
-    width: 52,
-    padding: '7px 8px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#e8e6ec',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  buyBtn: {
-    flex: 1,
-    padding: '8px 4px',
-    borderRadius: 8,
-    border: '1px solid rgba(52,211,153,.5)',
-    background: 'rgba(52,211,153,.12)',
-    color: '#a7f3d0',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-  },
-  proposalBox: {
-    marginTop: 9,
-    fontSize: 12.5,
-    padding: '8px 9px',
-    borderRadius: 8,
-    background: 'rgba(255,255,255,.05)',
-  },
-  confirmBtn: {
-    flex: 1,
-    padding: '8px 4px',
-    borderRadius: 8,
-    border: '1px solid #1f9d55',
-    background: '#1f9d55',
-    color: '#fff',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-  },
-  cancelBtn: {
-    padding: '8px 12px',
-    borderRadius: 8,
-    border: '1px solid rgba(255,255,255,.2)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#c9c6cf',
-    cursor: 'pointer',
-    fontSize: 12.5,
-  },
-  row: { marginBottom: 9 },
-  rowTop: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: 3,
-    opacity: 0.9,
-  },
-  value: { color: '#ff8a8e', fontVariantNumeric: 'tabular-nums' },
-  range: { width: '100%', accentColor: '#d8232a', margin: 0 },
-  checkRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    margin: '4px 0 12px',
-    cursor: 'pointer',
-  },
-  modesLbl: { fontSize: 11, opacity: 0.65, marginBottom: 6, lineHeight: 1.45 },
-  modes: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    gap: 7,
-    marginBottom: 8,
-  },
-  modeBtn: {
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-    transition: 'all .15s',
-  },
-  povBtn: {
-    width: '100%',
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid',
-    color: '#fff',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 600,
-    marginBottom: 8,
-  },
-  toolRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: 7,
-    marginBottom: 8,
-  },
-  toolBtn: {
-    padding: '10px 4px',
-    borderRadius: 9,
-    border: '1px solid rgba(255,255,255,.15)',
-    background: 'rgba(255,255,255,.06)',
-    color: '#c9c6cf',
-    cursor: 'pointer',
-    fontSize: 12.5,
-    fontWeight: 600,
-  },
-  help: {
-    fontSize: 11,
-    opacity: 0.55,
-    lineHeight: 1.5,
-    borderTop: '1px solid rgba(255,255,255,.1)',
-    paddingTop: 8,
-  },
-  burgerBtn: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.16)',
-    background: 'rgba(16,14,20,.74)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#e8e6ec',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
-    transition: 'opacity .25s',
-  },
-  exitBtn: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.16)',
-    background: 'rgba(16,14,20,.74)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#e8e6ec',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
-  },
-  homeBtn: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    width: 44,
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,.16)',
-    background: 'rgba(16,14,20,.74)',
-    backdropFilter: 'blur(14px)',
-    WebkitBackdropFilter: 'blur(14px)',
-    color: '#e8e6ec',
-    cursor: 'pointer',
-    boxShadow: '0 10px 40px rgba(0,0,0,.55)',
-  },
   minimap: {
     position: 'absolute',
     bottom: 16,
     left: 72,
-    borderRadius: 10,
-    border: '1px solid rgba(255,255,255,.14)',
-    background: 'rgba(12,10,16,.78)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
+    borderRadius: 14,
+    border: '0.5px solid rgba(255,255,255,.16)',
+    background: 'rgba(30,30,32,.5)',
+    backdropFilter: 'blur(30px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(30px) saturate(180%)',
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.5)',
   },
   povHint: {
+    WebkitBackdropFilter: 'blur(30px) saturate(180%)',
     position: 'absolute',
     top: 12,
     left: '50%',
     transform: 'translateX(-50%)',
-    background: 'rgba(16,14,20,.8)',
-    backdropFilter: 'blur(10px)',
+    background: 'rgba(30,30,32,.62)',
+    backdropFilter: 'blur(30px) saturate(180%)',
     border: '1px solid rgba(255,255,255,.16)',
     borderRadius: 999,
     padding: '8px 18px',
     color: '#e8e6ec',
     fontSize: 12.5,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     maxWidth: 'calc(100vw - 24px)',
     overflow: 'hidden',
@@ -2582,7 +2166,7 @@ const ui = {
     fontSize: 14,
     fontWeight: 600,
     cursor: 'pointer',
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     boxShadow: '0 8px 30px rgba(0,0,0,.5)',
     display: 'flex',
     alignItems: 'center',
@@ -2591,13 +2175,13 @@ const ui = {
     position: 'absolute',
     display: 'none',
     pointerEvents: 'none',
-    background: 'rgba(12,10,16,.92)',
+    background: 'rgba(30,30,32,.62)',
     border: '1px solid rgba(216,35,42,.45)',
     borderRadius: 8,
     padding: '5px 10px',
     color: '#e8e6ec',
     fontSize: 12,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     zIndex: 10,
   },
@@ -2613,7 +2197,7 @@ const ui = {
     color: '#a7f3d0',
     fontSize: 12.5,
     fontWeight: 600,
-    fontFamily: 'system-ui, sans-serif',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     whiteSpace: 'nowrap',
     zIndex: 9,
   },
