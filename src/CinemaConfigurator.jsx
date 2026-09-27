@@ -7,7 +7,8 @@ import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtil
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
   Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
-  SliderRow, Segmented, Switch, Stepper, NumberRow, Tile,
+  SliderRow, Switch, Stepper, NumberRow, Tile, Tabs, ToolBar, ProposalCard,
+  useToast, useKeys, useUiPref,
 } from './shared.jsx';
 
 // ============================================================================
@@ -39,6 +40,16 @@ const ROW_DEPTH_VIP = 1.55;
 const AISLE_W = 1.1;
 const FLY_MS = 1100;
 const STORAGE_KEY = 'ticketing3d.sala';
+// mitad de lo que tapa el panel lateral: la escena se desplaza esto a la izquierda
+const PANEL_OFFSET = 175;
+// colores de estado compartidos por minimapa y leyenda del panel
+const STATE_COLORS = {
+  free: '#8d8a96',
+  vip: '#d8232a',
+  blocked: '#403c48',
+  sold: '#6b5a20',
+  proposal: '#34d399',
+};
 
 const DEFAULT_PARAMS = {
   rows: 12,
@@ -111,10 +122,17 @@ export default function CinemaConfigurator({ onExit }) {
   const [buyN, setBuyN] = useState(2);
   const [proposal, setProposal] = useState(null); // {keys, total, label}
   const [tourUI, setTourUI] = useState(false);
-  const [shareMsg, setShareMsg] = useState('');
+  const [hist, setHist] = useState({ u: false, r: false });
+  const [uiPref, setUiPref] = useUiPref('ticketing3d.ui.cine', { tab: 'venta' });
   const isNarrow = useNarrow();
+  const { toast, showToast } = useToast();
+  const panelOpenRef = useRef(true);
+  const narrowRef = useRef(false);
 
   modeRef.current = mode;
+  panelOpenRef.current = panelOpen;
+  narrowRef.current = isNarrow;
+  const setTab = (tab) => setUiPref((u) => ({ ...u, tab }));
 
   // --------------------------------------------------------------------------
   // Serialización (export / compartir / autosave)
@@ -139,13 +157,19 @@ export default function CinemaConfigurator({ onExit }) {
     sold: T.current ? [...T.current.soldSet] : [],
   });
 
+  const syncHist = () => {
+    const h = histRef.current;
+    setHist({ u: h.idx >= 0, r: h.idx < h.stack.length - 2 });
+  };
+
   const pushHistory = useCallback(() => {
     const h = histRef.current;
     h.stack = h.stack.slice(0, h.idx + 1);
     h.stack.push(snapshotHist());
     if (h.stack.length > 60) h.stack.shift();
     h.idx = h.stack.length - 1;
-  }, []);
+    syncHist();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restoreHist = useCallback((snap) => {
     const t = T.current;
@@ -167,14 +191,16 @@ export default function CinemaConfigurator({ onExit }) {
     }
     restoreHist(h.stack[h.idx]);
     h.idx--;
-  }, [restoreHist]);
+    syncHist();
+  }, [restoreHist]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const redo = useCallback(() => {
     const h = histRef.current;
     if (h.idx >= h.stack.length - 2) return;
     h.idx++;
     restoreHist(h.stack[h.idx + 1]);
-  }, [restoreHist]);
+    syncHist();
+  }, [restoreHist]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --------------------------------------------------------------------------
   // Montaje: escena, cámara, luces, pantalla + vídeo, audio, input, render
@@ -628,6 +654,7 @@ export default function CinemaConfigurator({ onExit }) {
     };
     T.current.vipFallback = buildVipFallbackTemplate();
     T.current.vipTemplate = T.current.vipFallback;
+    T.current.viewOff = 0;
 
     // ---- carga del modelo VIP real (butacavip.dae) ---------------------------
     const daeLoader = new ColladaLoader();
@@ -1031,10 +1058,20 @@ export default function CinemaConfigurator({ onExit }) {
     window.addEventListener('pointercancel', onPointerUp);
     el.addEventListener('wheel', onWheel, { passive: false });
 
+    // desplaza la proyección para centrar la escena en la parte visible
+    const applyViewOffset = () => {
+      const t = T.current;
+      const w = mount.clientWidth;
+      const h = mount.clientHeight;
+      if (t.viewOff) camera.setViewOffset(w, h, t.viewOff, 0, w, h);
+      else camera.clearViewOffset();
+    };
+
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(mount.clientWidth, mount.clientHeight);
+      applyViewOffset();
     };
     window.addEventListener('resize', onResize);
 
@@ -1042,6 +1079,13 @@ export default function CinemaConfigurator({ onExit }) {
     const animate = () => {
       const t = T.current;
       const now = performance.now();
+
+      const wantOff = panelOpenRef.current && !narrowRef.current ? PANEL_OFFSET : 0;
+      if (t.viewOff !== wantOff) {
+        t.viewOff += (wantOff - t.viewOff) * 0.14;
+        if (Math.abs(wantOff - t.viewOff) < 0.5) t.viewOff = wantOff;
+        applyViewOffset();
+      }
 
       // tinte de la luz de proyección con el color medio del fotograma
       if (now - t.lastTintTime > 240 && video.readyState >= 2 && !video.paused) {
@@ -1243,15 +1287,15 @@ export default function CinemaConfigurator({ onExit }) {
     const off = 14;
     for (const s of seats) {
       const st = seatStates.current.get(s.key);
-      let c = '#8d8a96'; // libre estándar
+      let c = STATE_COLORS.free;
       if (heatRef.current) {
         const seat = t.seatByKey.get(s.key);
         const h = seat ? seat.userData.heat : 0;
         c = h === 0 ? '#2f9e44' : h === 1 ? '#e8a013' : '#d9480f';
-      } else if (st === 'blocked') c = '#403c48';
-      else if (t.proposal.has(s.key)) c = '#34d399';
-      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = '#6b5a20';
-      else if (st === 'vip' || s.autoVip) c = '#d8232a';
+      } else if (st === 'blocked') c = STATE_COLORS.blocked;
+      else if (t.proposal.has(s.key)) c = STATE_COLORS.proposal;
+      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = STATE_COLORS.sold;
+      else if (st === 'vip' || s.autoVip) c = STATE_COLORS.vip;
       ctx.fillStyle = c;
       const x = pad + (s.px - minX) * scale;
       const y = off + (s.pz - minZ) * scale;
@@ -1317,17 +1361,30 @@ export default function CinemaConfigurator({ onExit }) {
     drawMinimap();
   }, [heatOn, applySeatState, drawMinimap]);
 
-  // deshacer / rehacer con teclado
-  useEffect(() => {
-    const onKey = (e) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+  // atajos: ⌘Z/⇧⌘Z, Esc, 1-3 modos, V vista, H vista general, M panel
+  useKeys((e) => {
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') {
       e.preventDefault();
       if (e.shiftKey) redo();
       else undo();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo]);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = T.current;
+    if (k === 'escape') {
+      if (povUI && t) t.goHome();
+      else if (panelOpen) setPanelOpen(false);
+      return;
+    }
+    if (povUI) return;
+    if (k === '1') setMode('vip');
+    else if (k === '2') setMode('block');
+    else if (k === '3') setMode('clear');
+    else if (k === 'v') setMode((m) => (m === 'pov' ? 'vip' : 'pov'));
+    else if (k === 'h' && t) t.goHome();
+    else if (k === 'm') setPanelOpen((o) => !o);
+  });
 
   // autoguardado en localStorage (la config sobrevive al F5)
   useEffect(() => {
@@ -1785,9 +1842,10 @@ export default function CinemaConfigurator({ onExit }) {
       const seat = t.seatByKey.get(k);
       if (seat) applySeatState(seat);
     }
+    showToast(`Venta confirmada · ${fmtEUR(proposal.total)}`);
     setProposal(null);
     recount();
-  }, [proposal, pushHistory, applySeatState, recount]);
+  }, [proposal, pushHistory, applySeatState, recount, showToast]);
 
   // --------------------------------------------------------------------------
   // Acciones de UI
@@ -1801,6 +1859,7 @@ export default function CinemaConfigurator({ onExit }) {
     t.video.muted = !t.video.muted;
     t.video.play().catch(() => {});
     setMuted(t.video.muted);
+    showToast(t.video.muted ? 'Sonido silenciado' : 'Sonido activado');
   };
 
   const exportConfig = () => {
@@ -1813,6 +1872,7 @@ export default function CinemaConfigurator({ onExit }) {
     a.download = `sala-${params.rows}x${params.cols}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+    showToast('Configuración exportada');
   };
 
   const importConfig = (e) => {
@@ -1832,10 +1892,9 @@ export default function CinemaConfigurator({ onExit }) {
         if (data.prices) setPrices({ ...DEFAULT_PRICES, ...data.prices });
         setParams({ ...DEFAULT_PARAMS, ...data.params });
         setRegenTick((k) => k + 1);
+        showToast('Configuración importada');
       })
-      .catch(() => {
-        window.alert('El archivo no es una configuración de sala válida.');
-      });
+      .catch(() => showToast('Ese archivo no es una configuración de sala'));
   };
 
   const shareLink = () => {
@@ -1844,15 +1903,12 @@ export default function CinemaConfigurator({ onExit }) {
       const b64 = encodeURIComponent(utf8ToBase64(json));
       const url = `${window.location.origin}${window.location.pathname}#c=${b64}`;
       window.history.replaceState(null, '', `#c=${b64}`);
-      const done = () => {
-        setShareMsg('¡Enlace copiado!');
-        setTimeout(() => setShareMsg(''), 2500);
-      };
+      const done = () => showToast('Enlace copiado al portapapeles');
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(url).then(done, done);
       } else done();
     } catch (err) {
-      window.alert('No se pudo generar el enlace.');
+      showToast('No se pudo generar el enlace');
     }
   };
 
@@ -1866,6 +1922,7 @@ export default function CinemaConfigurator({ onExit }) {
     setPrices(DEFAULT_PRICES);
     setParams({ ...DEFAULT_PARAMS });
     setRegenTick((k) => k + 1);
+    showToast('Sala restablecida');
   };
 
   const takeSnapshot = () => {
@@ -1875,6 +1932,7 @@ export default function CinemaConfigurator({ onExit }) {
     a.href = t.snapshot();
     a.download = 'sala-captura.png';
     a.click();
+    showToast('Captura guardada');
   };
 
   const setP = (k) => (v) => setParams((p) => ({ ...p, [k]: v }));
@@ -1978,141 +2036,179 @@ export default function CinemaConfigurator({ onExit }) {
         </button>
       )}
 
-      {/* panel lateral estilo Apple */}
-      <Panel open={panelOpen} sheet={isNarrow} accent="#ff453a" label="Configuración de la sala">
-        <PanelHeader
-          title="Sala de cine"
-          subtitle="Cinemes Full HD · Centre Splau"
-          onClose={() => setPanelOpen(false)}
-        />
-        <div className="t3d-scroll">
-          <Section>
-            <Stats
-              items={[
-                { label: 'Libres', value: libres, color: '#30d158' },
-                { label: 'VIP', value: counts.vip, color: '#ff453a' },
-                { label: 'Bloq.', value: counts.blocked, color: '#8e8e93' },
-                { label: 'Vendidas', value: counts.sold, color: '#ffd60a' },
+      {/* barra de modos: la acción principal sobre la escena, siempre a mano */}
+      <ToolBar
+        label="Acción al tocar una butaca"
+        hidden={povUI || tourUI || (isNarrow && panelOpen)}
+        offsetX={panelOpen && !isNarrow ? PANEL_OFFSET : 0}
+        items={[
+          { key: 'vip', label: 'VIP', dot: STATE_COLORS.vip, active: mode === 'vip', shortcut: '1', onClick: () => setMode('vip') },
+          { key: 'block', label: 'Bloquear', icon: icons.ban, active: mode === 'block', shortcut: '2', onClick: () => setMode('block') },
+          { key: 'clear', label: 'Normal', icon: icons.eraser, active: mode === 'clear', shortcut: '3', onClick: () => setMode('clear') },
+          { sep: true },
+          { key: 'pov', label: 'Ver desde la butaca', icon: icons.eye, active: mode === 'pov', shortcut: 'V', onClick: () => setMode(mode === 'pov' ? 'vip' : 'pov') },
+        ]}
+      />
+
+      {toast}
+
+      {/* panel lateral estilo Apple, organizado por tareas */}
+      <Panel
+        open={panelOpen}
+        sheet={isNarrow}
+        accent="#ff453a"
+        label="Configuración de la sala"
+        onClose={() => setPanelOpen(false)}
+        top={
+          <>
+            <PanelHeader
+              title="Sala de cine"
+              subtitle="Cinemes Full HD · Centre Splau"
+              onClose={() => setPanelOpen(false)}
+              actions={[
+                { label: 'Deshacer', icon: icons.undo, onClick: undo, disabled: !hist.u, shortcut: '⌘Z' },
+                { label: 'Rehacer', icon: icons.redo, onClick: redo, disabled: !hist.r, shortcut: '⇧⌘Z' },
               ]}
             />
-          </Section>
-
-          <Section label="Taquilla">
-            <Row label="Recaudación" detail={fmtEUR(revenue)} strong />
-            <Row label="Aforo completo" detail={fmtEUR(potential)} />
-            <NumberRow
-              label="Precio estándar"
-              value={prices.std}
-              step={0.5}
-              onChange={(v) => setPrices((p) => ({ ...p, std: v }))}
-            />
-            <NumberRow
-              label="Precio VIP"
-              dot="#ff453a"
-              value={prices.vip}
-              step={0.5}
-              onChange={(v) => setPrices((p) => ({ ...p, vip: v }))}
-            />
-          </Section>
-
-          <Section label="Comprar entradas">
-            <Row label="Entradas">
-              <Stepper value={buyN} min={1} max={8} onChange={setBuyN} label="Número de entradas" />
-            </Row>
-            <RowButton onClick={proposeSeats}>
-              <Ic>{icons.ticket}</Ic>
-              Sugerir mejores asientos
-            </RowButton>
-            {proposal && (
-              proposal.keys.length ? (
-                <>
-                  <Row label={proposal.label} detail={fmtEUR(proposal.total)} strong />
-                  <div className="t3d-row" style={{ justifyContent: 'flex-end', gap: 16 }}>
-                    <button className="t3d-link" onClick={clearProposal}>Cancelar</button>
-                    <button className="t3d-btn is-primary is-small" onClick={confirmProposal}>
-                      Confirmar venta
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <Row label={proposal.label} />
-              )
-            )}
-          </Section>
-
-          <Section
-            label="Al tocar una butaca"
-            plain
-            footnote="Arrastra para pintar varias · toca el número de fila para marcarla entera."
-          >
-            <Segmented
-              label="Acción al tocar una butaca"
-              value={mode === 'pov' ? null : mode}
-              onChange={setMode}
-              options={[
-                { value: 'vip', label: 'VIP' },
-                { value: 'block', label: 'Bloquear' },
-                { value: 'clear', label: 'Normal' },
-              ]}
-            />
-            <div style={{ height: 8 }} />
-            <button
-              className="t3d-btn"
-              aria-pressed={mode === 'pov'}
-              onClick={() => setMode(mode === 'pov' ? 'vip' : 'pov')}
-            >
-              <Ic>{icons.eye}</Ic>
-              Ver desde la butaca
-            </button>
-          </Section>
-
-          <Section label="Sala">
-            <SliderRow label="Filas" value={params.rows} min={3} max={24} step={1} onChange={setP('rows')} />
-            <SliderRow label="Butacas por fila" value={params.cols} min={6} max={32} step={1} onChange={setP('cols')} />
-            <SliderRow label="Filas VIP traseras" value={params.vipRows} min={0} max={6} step={1} onChange={setP('vipRows')} />
-            <SliderRow label="Curvatura" value={params.curvature} unit="%" min={0} max={100} step={1} onChange={setP('curvature')} />
-            <SliderRow label="Pendiente" value={params.slope} unit=" m/fila" min={0} max={0.6} step={0.01} onChange={setP('slope')} />
-            <SliderRow label="Separación" value={params.spacing} unit=" m" min={0.68} max={1} step={0.01} onChange={setP('spacing')} />
-            <Row label="Pasillo central">
-              <Switch checked={params.aisle} onChange={setP('aisle')} label="Pasillo central" />
-            </Row>
-          </Section>
-
-          <Section label="Pantalla">
-            <SliderRow label="Ancho" value={params.screenWPct} unit="%" min={40} max={100} step={1} onChange={setP('screenWPct')} />
-            <SliderRow label="Alto" value={params.screenH} unit=" m" min={2} max={8.2} step={0.1} onChange={setP('screenH')} />
-          </Section>
-
-          <Section label="Simulación">
-            <SliderRow label="Ocupación" value={params.occupancy} unit="%" min={0} max={100} step={1} onChange={setP('occupancy')} />
-          </Section>
-
-          <Section
-            label="Herramientas"
-            plain
-            footnote="Arrastra para orbitar · rueda o pellizco para el zoom · Ctrl+Z deshace."
-          >
-            <div className="t3d-tiles">
-              <Tile icon={icons.target} label="Mapa de visión" active={heatOn} onClick={() => setHeatOn((v) => !v)} />
-              <Tile icon={muted ? icons.volOff : icons.volOn} label="Sonido" active={!muted} onClick={toggleSound} />
-              <Tile icon={icons.play} label="Recorrido" onClick={() => T.current && T.current.startTour()} />
-              <Tile icon={icons.camera} label="Captura" onClick={takeSnapshot} />
-              <Tile icon={icons.undo} label="Deshacer" onClick={undo} />
-              <Tile icon={icons.redo} label="Rehacer" onClick={redo} />
-              <Tile icon={icons.download} label="Exportar" onClick={exportConfig} />
-              <Tile icon={icons.upload} label="Importar" onClick={() => fileRef.current && fileRef.current.click()} />
-              <Tile icon={icons.share} label={shareMsg || 'Compartir'} onClick={shareLink} />
-              <Tile icon={icons.trash} label="Reiniciar" onClick={resetAll} />
+            <div className="t3d-summary">
+              <Stats
+                items={[
+                  { label: 'Libres', value: libres, color: STATE_COLORS.free },
+                  { label: 'VIP', value: counts.vip, color: STATE_COLORS.vip },
+                  { label: 'Bloq.', value: counts.blocked, color: STATE_COLORS.blocked },
+                  { label: 'Vendidas', value: counts.sold, color: STATE_COLORS.sold },
+                ]}
+              />
             </div>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="application/json,.json"
-              onChange={importConfig}
-              style={{ display: 'none' }}
+            <Tabs
+              value={uiPref.tab}
+              onChange={setTab}
+              tabs={[
+                { value: 'venta', label: 'Venta' },
+                { value: 'sala', label: 'Sala' },
+                { value: 'mas', label: 'Más' },
+              ]}
             />
-          </Section>
-        </div>
+          </>
+        }
+      >
+        {uiPref.tab === 'venta' && (
+          <div className="t3d-tabpanel" key="venta">
+            <Section
+              label="Comprar entradas"
+              footnote={
+                proposal && !proposal.keys.length
+                  ? proposal.label
+                  : 'Busca el bloque contiguo libre con mejor visión de la pantalla.'
+              }
+            >
+              <Row label="Entradas">
+                <Stepper value={buyN} min={1} max={8} onChange={setBuyN} label="Número de entradas" />
+              </Row>
+              <RowButton onClick={proposeSeats}>
+                <Ic>{icons.ticket}</Ic>
+                Sugerir mejores asientos
+              </RowButton>
+            </Section>
+            {proposal && proposal.keys.length > 0 && (
+              <ProposalCard
+                title={proposal.label}
+                detail={`${proposal.keys.length} ${proposal.keys.length === 1 ? 'entrada' : 'entradas'}`}
+                total={proposal.total}
+                onConfirm={confirmProposal}
+                onCancel={clearProposal}
+              />
+            )}
+
+            <Section label="Taquilla">
+              <Row label="Recaudación" detail={fmtEUR(revenue)} strong />
+              <Row label="Aforo completo" detail={fmtEUR(potential)} />
+              <NumberRow
+                label="Precio estándar"
+                dot={STATE_COLORS.free}
+                value={prices.std}
+                step={0.5}
+                onChange={(v) => setPrices((p) => ({ ...p, std: v }))}
+              />
+              <NumberRow
+                label="Precio VIP"
+                dot={STATE_COLORS.vip}
+                value={prices.vip}
+                step={0.5}
+                onChange={(v) => setPrices((p) => ({ ...p, vip: v }))}
+              />
+            </Section>
+
+            <Section label="Simulación" footnote="Marca butacas como vendidas al azar para ver la sala con público.">
+              <SliderRow label="Ocupación" value={params.occupancy} unit="%" min={0} max={100} step={1} onChange={setP('occupancy')} />
+            </Section>
+          </div>
+        )}
+
+        {uiPref.tab === 'sala' && (
+          <div className="t3d-tabpanel" key="sala">
+            <Section label="Butacas">
+              <SliderRow label="Filas" value={params.rows} min={3} max={24} step={1} onChange={setP('rows')} />
+              <SliderRow label="Butacas por fila" value={params.cols} min={6} max={32} step={1} onChange={setP('cols')} />
+              <SliderRow label="Filas VIP traseras" value={params.vipRows} min={0} max={6} step={1} onChange={setP('vipRows')} />
+              <SliderRow label="Separación" value={params.spacing} unit=" m" min={0.68} max={1} step={0.01} onChange={setP('spacing')} />
+              <Row label="Pasillo central">
+                <Switch checked={params.aisle} onChange={setP('aisle')} label="Pasillo central" />
+              </Row>
+            </Section>
+
+            <Section label="Graderío">
+              <SliderRow label="Curvatura" value={params.curvature} unit="%" min={0} max={100} step={1} onChange={setP('curvature')} />
+              <SliderRow label="Pendiente" value={params.slope} unit=" m/fila" min={0} max={0.6} step={0.01} onChange={setP('slope')} />
+            </Section>
+
+            <Section label="Pantalla" footnote="Por defecto ocupa todo el ancho y deja un metro libre sobre el suelo.">
+              <SliderRow label="Ancho" value={params.screenWPct} unit="%" min={40} max={100} step={1} onChange={setP('screenWPct')} />
+              <SliderRow label="Alto" value={params.screenH} unit=" m" min={2} max={8.2} step={0.1} onChange={setP('screenH')} />
+            </Section>
+          </div>
+        )}
+
+        {uiPref.tab === 'mas' && (
+          <div className="t3d-tabpanel" key="mas">
+            <Section label="Visualización" plain>
+              <div className="t3d-tiles">
+                <Tile icon={icons.target} label="Mapa de visión" active={heatOn} onClick={() => setHeatOn((v) => !v)} />
+                <Tile icon={muted ? icons.volOff : icons.volOn} label="Sonido" active={!muted} onClick={toggleSound} />
+                <Tile icon={icons.play} label="Recorrido" onClick={() => T.current && T.current.startTour()} />
+                <Tile icon={icons.camera} label="Captura" onClick={takeSnapshot} />
+              </div>
+            </Section>
+
+            <Section label="Archivo" plain>
+              <div className="t3d-tiles">
+                <Tile icon={icons.share} label="Compartir" onClick={shareLink} />
+                <Tile icon={icons.download} label="Exportar" onClick={exportConfig} />
+                <Tile icon={icons.upload} label="Importar" onClick={() => fileRef.current && fileRef.current.click()} />
+                <Tile icon={icons.trash} label="Restablecer" onClick={resetAll} />
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={importConfig}
+                style={{ display: 'none' }}
+              />
+            </Section>
+
+            <Section
+              label="Atajos de teclado"
+              footnote="Arrastra para orbitar, rueda o pellizco para el zoom. Arrastra sobre las butacas para marcar varias; toca el número de fila para marcarla entera."
+            >
+              <Row label="VIP · Bloquear · Normal"><span className="t3d-kbd">1</span><span className="t3d-kbd">2</span><span className="t3d-kbd">3</span></Row>
+              <Row label="Ver desde la butaca"><span className="t3d-kbd">V</span></Row>
+              <Row label="Vista general"><span className="t3d-kbd">H</span></Row>
+              <Row label="Mostrar u ocultar el panel"><span className="t3d-kbd">M</span></Row>
+              <Row label="Deshacer · Rehacer"><span className="t3d-kbd">⌘Z</span><span className="t3d-kbd">⇧⌘Z</span></Row>
+              <Row label="Cerrar · salir de la vista"><span className="t3d-kbd">Esc</span></Row>
+            </Section>
+          </div>
+        )}
       </Panel>
     </div>
   );

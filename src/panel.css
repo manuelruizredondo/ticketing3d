@@ -62,6 +62,13 @@
   flex-shrink: 0;
 }
 
+.t3d-top {
+  flex-shrink: 0;
+  touch-action: none;
+}
+.t3d-panel.is-sheet .t3d-top {
+  cursor: grab;
+}
 .t3d-scroll {
   flex: 1;
   overflow-y: auto;
@@ -90,8 +97,11 @@
   color: var(--secondary);
   margin-top: 1px;
 }
+.t3d-head-text {
+  flex: 1;
+  min-width: 0;
+}
 .t3d-icon-btn {
-  margin-left: auto;
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -104,9 +114,13 @@
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
 }
-.t3d-icon-btn:hover {
+.t3d-icon-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.18);
   color: var(--label);
+}
+.t3d-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 /* ---- secciones y listas agrupadas ------------------------------------------ */
@@ -185,6 +199,12 @@
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
+  /* aro fino: los estados oscuros también se distinguen sobre el cristal */
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.4);
+}
+.t3d-toolbar .t3d-dot {
+  width: 10px;
+  height: 10px;
 }
 
 /* ---- estadísticas ------------------------------------------------------------ */
@@ -494,4 +514,197 @@
 .t3d-fab.is-hidden {
   opacity: 0;
   pointer-events: none;
+}
+
+/* ---- resumen fijo y pestañas ---------------------------------------------------------- */
+.t3d-summary {
+  margin: 4px 14px 0;
+  background: var(--fill);
+  border-radius: 14px;
+}
+.t3d-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 12px 14px 4px;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(118, 118, 128, 0.24);
+}
+.t3d-tabs button {
+  flex: 1;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.25s var(--ease), color 0.2s;
+}
+.t3d-tabs button[aria-selected='true'] {
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--label);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14), inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+}
+.t3d-tabpanel {
+  animation: t3d-fade 0.25s ease;
+}
+@keyframes t3d-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- propuesta de compra ---------------------------------------------------------------- */
+.t3d-proposal {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: t3d-fade 0.25s ease;
+}
+.t3d-proposal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.t3d-proposal-head > div:first-child {
+  flex: 1;
+}
+.t3d-proposal-title {
+  font-weight: 600;
+}
+.t3d-proposal-total {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.t3d-proposal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+}
+.t3d-proposal-actions .t3d-btn + .t3d-btn {
+  margin-top: 0;
+}
+
+/* ---- barra de herramientas flotante sobre la escena --------------------------------------- */
+.t3d-toolbar {
+  --ox: 0px;
+  position: absolute;
+  top: 14px;
+  /* nunca debajo del botón de volver (arriba a la izquierda) */
+  left: max(calc(50% - var(--ox)), 180px);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.6);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+  font: 500 13px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  transform: translateX(-50%);
+  transition: left 0.5s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.3s, transform 0.3s;
+  white-space: nowrap;
+}
+.t3d-toolbar.is-hidden {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+  pointer-events: none;
+}
+.t3d-toolbar button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.t3d-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.t3d-toolbar button[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.92);
+  color: #1c1c1e;
+}
+.t3d-toolbar-sep {
+  width: 0.5px;
+  height: 20px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.2);
+}
+/* escritorio estrecho: solo iconos para que no choque con el panel */
+@media (max-width: 1000px) {
+  .t3d-toolbar button > span:last-child {
+    display: none;
+  }
+  .t3d-toolbar button {
+    padding: 9px 11px;
+  }
+}
+/* móvil: arriba, entre los botones de volver y de menú (abajo va el minimapa) */
+@media (max-width: 640px) {
+  .t3d-toolbar {
+    left: 50%;
+    padding: 3px;
+  }
+  .t3d-toolbar button > span:last-child {
+    display: none;
+  }
+  .t3d-toolbar button {
+    padding: 9px 11px;
+  }
+}
+
+/* ---- aviso HUD ---------------------------------------------------------------------------- */
+.t3d-toast-wrap {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  z-index: 30;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.t3d-toast {
+  padding: 10px 18px;
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(28, 28, 30, 0.72);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.95);
+  font: 500 13px/1.2 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  white-space: nowrap;
+  animation: t3d-toast 2s ease forwards;
+}
+@keyframes t3d-toast {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  12% { opacity: 1; transform: none; }
+  82% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+
+/* ---- atajos visibles en las filas ------------------------------------------------------- */
+.t3d-kbd {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }

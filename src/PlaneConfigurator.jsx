@@ -4,7 +4,8 @@ import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtil
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
   Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
-  SliderRow, Segmented, Stepper, NumberRow, Tile,
+  SliderRow, Segmented, Stepper, NumberRow, Tile, Tabs, ToolBar, ProposalCard,
+  useToast, useKeys, useUiPref,
 } from './shared.jsx';
 
 // ============================================================================
@@ -60,6 +61,16 @@ const ZONE_COLORS = {
 const DEFAULT_PARAMS = { aircraft: 'a320', pitch: 0.78, occupancy: 0 };
 const DEFAULT_PRICES = { one: 30, plus: 20, space: 15, front: 8 };
 const STORAGE_KEY = 'ticketing3d.avion';
+// mitad de lo que tapa el panel lateral: la escena se desplaza esto a la izquierda
+const PANEL_OFFSET = 175;
+// colores de estado compartidos por minimapa y leyenda del panel
+const STATE_COLORS = {
+  free: '#8d94a1',
+  sel: '#4ade80',
+  blocked: '#6b7280',
+  sold: '#2a2e36',
+  proposal: '#34d399',
+};
 
 export default function PlaneConfigurator({ onExit }) {
   const mountRef = useRef(null);
@@ -96,9 +107,68 @@ export default function PlaneConfigurator({ onExit }) {
   const [buyN, setBuyN] = useState(2);
   const [buyPref, setBuyPref] = useState('best'); // 'best' | 'cheap'
   const [proposal, setProposal] = useState(null);
+  const [hist, setHist] = useState({ u: false, r: false });
+  const [uiPref, setUiPref] = useUiPref('ticketing3d.ui.avion', { tab: 'venta' });
   const isNarrow = useNarrow();
+  const { toast, showToast } = useToast();
+  const histRef = useRef({ stack: [], idx: -1 });
+  const panelOpenRef = useRef(true);
+  const narrowRef = useRef(false);
 
   modeRef.current = mode;
+  panelOpenRef.current = panelOpen;
+  narrowRef.current = isNarrow;
+  const setTab = (tab) => setUiPref((u) => ({ ...u, tab }));
+
+  // --------------------------------------------------------------------------
+  // Historial (deshacer / rehacer) del avión que se está editando
+  // --------------------------------------------------------------------------
+  const snapshotHist = () => ({
+    states: [...seatStates.current.entries()],
+    sold: T.current ? [...T.current.soldSet] : [],
+  });
+  const syncHist = () => {
+    const h = histRef.current;
+    setHist({ u: h.idx >= 0, r: h.idx < h.stack.length - 2 });
+  };
+  const pushHistory = useCallback(() => {
+    const h = histRef.current;
+    h.stack = h.stack.slice(0, h.idx + 1);
+    h.stack.push(snapshotHist());
+    if (h.stack.length > 60) h.stack.shift();
+    h.idx = h.stack.length - 1;
+    syncHist();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const clearHistory = () => {
+    histRef.current = { stack: [], idx: -1 };
+    syncHist();
+  };
+  const restoreHist = (snap) => {
+    const t = T.current;
+    if (!t) return;
+    seatStates.current = new Map(snap.states);
+    t.soldSet = new Set(snap.sold);
+    t.proposal = new Set();
+    t.markerKeys = [];
+    setProposal(null);
+    if (t.seatsGroup) for (const g of t.seatsGroup.children) applySeatState(g);
+    recount();
+  };
+  const undo = () => {
+    const h = histRef.current;
+    if (h.idx < 0) return;
+    if (h.idx === h.stack.length - 1) h.stack.push(snapshotHist());
+    restoreHist(h.stack[h.idx]);
+    h.idx--;
+    syncHist();
+  };
+  const redo = () => {
+    const h = histRef.current;
+    if (h.idx >= h.stack.length - 2) return;
+    h.idx++;
+    restoreHist(h.stack[h.idx + 1]);
+    syncHist();
+  };
 
   // --------------------------------------------------------------------------
   // Montaje
@@ -402,6 +472,7 @@ export default function PlaneConfigurator({ onExit }) {
       markerKeys: [],
       markerIdx: 0,
       markerNextAt: 0,
+      viewOff: 0,
       lastAircraft: null,
       introStart: 0,
       raf: 0,
@@ -550,6 +621,7 @@ export default function PlaneConfigurator({ onExit }) {
       ) {
         const res = pickAt(e.clientX, e.clientY);
         if (res && res.seat) {
+          pushHistory();
           t.painting = true;
           t.lastPaintKey = res.seat.userData.key;
           applyModeTo(res.seat);
@@ -649,10 +721,20 @@ export default function PlaneConfigurator({ onExit }) {
     window.addEventListener('pointercancel', onPointerUp);
     el.addEventListener('wheel', onWheel, { passive: false });
 
+    // desplaza la proyección para centrar la escena en la parte visible
+    const applyViewOffset = () => {
+      const t = T.current;
+      const w = mount.clientWidth;
+      const h = mount.clientHeight;
+      if (t.viewOff) camera.setViewOffset(w, h, t.viewOff, 0, w, h);
+      else camera.clearViewOffset();
+    };
+
     const onResize = () => {
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(mount.clientWidth, mount.clientHeight);
+      applyViewOffset();
     };
     window.addEventListener('resize', onResize);
 
@@ -660,6 +742,13 @@ export default function PlaneConfigurator({ onExit }) {
     const animate = () => {
       const t = T.current;
       const now = performance.now();
+
+      const wantOff = panelOpenRef.current && !narrowRef.current ? PANEL_OFFSET : 0;
+      if (t.viewOff !== wantOff) {
+        t.viewOff += (wantOff - t.viewOff) * 0.14;
+        if (Math.abs(wantOff - t.viewOff) < 0.5) t.viewOff = wantOff;
+        applyViewOffset();
+      }
 
       for (const c of clouds) {
         c.position.z += 0.028;
@@ -855,10 +944,10 @@ export default function PlaneConfigurator({ onExit }) {
       let c = ZONE_COLORS[s.zone];
       if (wingViewRef.current) {
         c = s.heat === 0 ? '#2f9e44' : s.heat === 1 ? '#e8a013' : '#d9480f';
-      } else if (st === 'blocked') c = '#565b66';
-      else if (t.proposal.has(s.key)) c = '#34d399';
-      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = '#454a54';
-      else if (st === 'sel') c = '#4ade80';
+      } else if (st === 'blocked') c = STATE_COLORS.blocked;
+      else if (t.proposal.has(s.key)) c = STATE_COLORS.proposal;
+      else if (t.soldSet.has(s.key) || t.occupiedSet.has(s.key)) c = STATE_COLORS.sold;
+      else if (st === 'sel') c = STATE_COLORS.sel;
       ctx.fillStyle = c;
       ctx.fillRect(zx(s.pz) - dot / 2, xy(s.px) - dot / 2, dot, dot);
     }
@@ -885,8 +974,11 @@ export default function PlaneConfigurator({ onExit }) {
     const seat = t.seatByKey.get(best.key);
     if (!seat) return;
     if (modeRef.current === 'pov' || t.pov.active) t.enterPovAt(seat);
-    else t.applyModeTo(seat);
-  }, []);
+    else {
+      pushHistory();
+      t.applyModeTo(seat);
+    }
+  }, [pushHistory]);
 
   const recount = useCallback(() => {
     const t = T.current;
@@ -941,6 +1033,7 @@ export default function PlaneConfigurator({ onExit }) {
       seatStates.current = new Map(next.states || []);
       t.soldSet = new Set(next.sold || []);
       t.lastAircraft = aircraft;
+      clearHistory();
     }
 
     for (const k of ['seatsGroup', 'cabinGroup']) {
@@ -1284,7 +1377,33 @@ export default function PlaneConfigurator({ onExit }) {
     writeStorage(STORAGE_KEY, null);
     setPrices(DEFAULT_PRICES);
     setParams({ ...DEFAULT_PARAMS });
+    showToast('Cabina restablecida');
   };
+
+  // atajos: ⌘Z/⇧⌘Z, Esc, 1-3 modos, V vista, H vista general, M panel
+  useKeys((e) => {
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = T.current;
+    if (k === 'escape') {
+      if (povUI && t) t.goHome();
+      else if (panelOpen) setPanelOpen(false);
+      return;
+    }
+    if (povUI) return;
+    if (k === '1') setMode('sel');
+    else if (k === '2') setMode('block');
+    else if (k === '3') setMode('clear');
+    else if (k === 'v') setMode((m) => (m === 'pov' ? 'sel' : 'pov'));
+    else if (k === 'h' && t) t.goHome();
+    else if (k === 'm') setPanelOpen((o) => !o);
+  });
 
   // --------------------------------------------------------------------------
   // Compra: mejores N asientos contiguos (mismo bloque, sin cruzar pasillo)
@@ -1368,6 +1487,7 @@ export default function PlaneConfigurator({ onExit }) {
   const confirmProposal = useCallback(() => {
     const t = T.current;
     if (!t || !proposal || !proposal.keys.length) return;
+    pushHistory();
     for (const k of proposal.keys) t.soldSet.add(k);
     t.proposal = new Set();
     t.markerKeys = [];
@@ -1375,9 +1495,10 @@ export default function PlaneConfigurator({ onExit }) {
       const seat = t.seatByKey.get(k);
       if (seat) applySeatState(seat);
     }
+    showToast(`Venta confirmada · ${fmtEUR(proposal.total)}`);
     setProposal(null);
     recount();
-  }, [proposal, applySeatState, recount]);
+  }, [proposal, applySeatState, recount, pushHistory, showToast]);
 
   // --------------------------------------------------------------------------
   // UI
@@ -1467,152 +1588,186 @@ export default function PlaneConfigurator({ onExit }) {
         </button>
       )}
 
-      {/* panel lateral estilo Apple */}
-      <Panel open={panelOpen} sheet={isNarrow} accent="#409cff" label="Configuración de la cabina">
-        <PanelHeader
-          title={`Cabina ${model.label}`}
-          subtitle="Flota low-cost · zonas Space"
-          onClose={() => setPanelOpen(false)}
-        />
-        <div className="t3d-scroll">
-          <Section label="Avión" plain>
-            <Segmented
-              label="Modelo de avión"
-              value={params.aircraft}
-              onChange={(id2) => setParams((p) => ({ ...p, aircraft: id2 }))}
-              options={Object.entries(AIRCRAFT).map(([id2, m2]) => ({ value: id2, label: m2.label }))}
-            />
-          </Section>
+      {/* barra de modos: la acción principal sobre la escena, siempre a mano */}
+      <ToolBar
+        label="Acción al tocar un asiento"
+        hidden={povUI || (isNarrow && panelOpen)}
+        offsetX={panelOpen && !isNarrow ? PANEL_OFFSET : 0}
+        items={[
+          { key: 'sel', label: 'Seleccionar', icon: icons.check, active: mode === 'sel', shortcut: '1', onClick: () => setMode('sel') },
+          { key: 'block', label: 'Bloquear', icon: icons.ban, active: mode === 'block', shortcut: '2', onClick: () => setMode('block') },
+          { key: 'clear', label: 'Normal', icon: icons.eraser, active: mode === 'clear', shortcut: '3', onClick: () => setMode('clear') },
+          { sep: true },
+          { key: 'pov', label: 'Ver desde el asiento', icon: icons.eye, active: mode === 'pov', shortcut: 'V', onClick: () => setMode(mode === 'pov' ? 'sel' : 'pov') },
+        ]}
+      />
 
-          <Section>
-            <Stats
-              items={[
-                { label: 'Libres', value: libres, color: '#aeaeb2' },
-                { label: 'Selecc.', value: counts.sel, color: '#30d158' },
-                { label: 'Bloq.', value: counts.blocked, color: '#636366' },
-                { label: 'Vendidos', value: counts.sold, color: '#ffd60a' },
+      {toast}
+
+      {/* panel lateral estilo Apple, organizado por tareas */}
+      <Panel
+        open={panelOpen}
+        sheet={isNarrow}
+        accent="#409cff"
+        label="Configuración de la cabina"
+        onClose={() => setPanelOpen(false)}
+        top={
+          <>
+            <PanelHeader
+              title={`Cabina ${model.label}`}
+              subtitle="Flota low-cost · zonas Space"
+              onClose={() => setPanelOpen(false)}
+              actions={[
+                { label: 'Deshacer', icon: icons.undo, onClick: undo, disabled: !hist.u, shortcut: '⌘Z' },
+                { label: 'Rehacer', icon: icons.redo, onClick: redo, disabled: !hist.r, shortcut: '⇧⌘Z' },
               ]}
             />
-          </Section>
-
-          <Section
-            label="Precios por zona"
-            footnote="Regular va incluido en la tarifa. Sin fila 13, como en los aviones reales."
-          >
-            <Row label="Ingresos por asientos" detail={fmtEUR(revenue)} strong />
-            <Row label="Avión lleno" detail={fmtEUR(potential)} />
-            {[
-              ['one', 'Space One'],
-              ['plus', 'Space Plus'],
-              ['space', 'Space · salida'],
-              ['front', 'Delanteros y traseros'],
-            ].map(([zc, label]) => (
-              <NumberRow
-                key={zc}
-                label={label}
-                dot={ZONE_COLORS[zc]}
-                value={prices[zc]}
-                onChange={(v) => setPrices((p) => ({ ...p, [zc]: v }))}
+            <div className="t3d-summary">
+              <Stats
+                items={[
+                  { label: 'Libres', value: libres, color: STATE_COLORS.free },
+                  { label: 'Selecc.', value: counts.sel, color: STATE_COLORS.sel },
+                  { label: 'Bloq.', value: counts.blocked, color: STATE_COLORS.blocked },
+                  { label: 'Vendidos', value: counts.sold, color: STATE_COLORS.sold },
+                ]}
               />
-            ))}
-          </Section>
-
-          <Section label="Viajamos juntos">
-            <Row label="Pasajeros">
-              <Stepper value={buyN} min={1} max={3} onChange={setBuyN} label="Número de pasajeros" />
-            </Row>
-            <div className="t3d-row">
-              <div style={{ flex: 1 }}>
-                <Segmented
-                  label="Criterio"
-                  value={buyPref}
-                  onChange={setBuyPref}
-                  options={[
-                    { value: 'best', label: 'Mejores' },
-                    { value: 'cheap', label: 'Sin coste' },
-                  ]}
-                />
-              </div>
             </div>
-            <RowButton onClick={proposeSeats}>
-              <Ic>{icons.ticket}</Ic>
-              Sugerir asientos
-            </RowButton>
-            {proposal && (
-              proposal.keys.length ? (
-                <>
-                  <Row label={proposal.label} detail={fmtEUR(proposal.total)} strong />
-                  <div className="t3d-row" style={{ justifyContent: 'flex-end', gap: 16 }}>
-                    <button className="t3d-link" onClick={clearProposal}>Cancelar</button>
-                    <button className="t3d-btn is-primary is-small" onClick={confirmProposal}>
-                      Confirmar venta
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <Row label={proposal.label} />
-              )
-            )}
-          </Section>
-
-          <Section
-            label="Al tocar un asiento"
-            plain
-            footnote="Arrastra para pintar varios asientos a la vez."
-          >
-            <Segmented
-              label="Acción al tocar un asiento"
-              value={mode === 'pov' ? null : mode}
-              onChange={setMode}
-              options={[
-                { value: 'sel', label: 'Seleccionar' },
-                { value: 'block', label: 'Bloquear' },
-                { value: 'clear', label: 'Normal' },
+            <Tabs
+              value={uiPref.tab}
+              onChange={setTab}
+              tabs={[
+                { value: 'venta', label: 'Venta' },
+                { value: 'cabina', label: 'Cabina' },
+                { value: 'mas', label: 'Más' },
               ]}
             />
-            <div style={{ height: 8 }} />
-            <button
-              className="t3d-btn"
-              aria-pressed={mode === 'pov'}
-              onClick={() => setMode(mode === 'pov' ? 'sel' : 'pov')}
+          </>
+        }
+      >
+        {uiPref.tab === 'venta' && (
+          <div className="t3d-tabpanel" key="venta">
+            <Section
+              label="Viajamos juntos"
+              footnote={
+                proposal && !proposal.keys.length
+                  ? proposal.label
+                  : 'Asientos contiguos en la misma fila, sin cruzar el pasillo.'
+              }
             >
-              <Ic>{icons.eye}</Ic>
-              Ver desde el asiento
-            </button>
-          </Section>
+              <Row label="Pasajeros">
+                <Stepper value={buyN} min={1} max={3} onChange={setBuyN} label="Número de pasajeros" />
+              </Row>
+              <div className="t3d-row">
+                <div style={{ flex: 1 }}>
+                  <Segmented
+                    label="Criterio"
+                    value={buyPref}
+                    onChange={setBuyPref}
+                    options={[
+                      { value: 'best', label: 'Mejores asientos' },
+                      { value: 'cheap', label: 'Sin coste' },
+                    ]}
+                  />
+                </div>
+              </div>
+              <RowButton onClick={proposeSeats}>
+                <Ic>{icons.ticket}</Ic>
+                Sugerir asientos
+              </RowButton>
+            </Section>
+            {proposal && proposal.keys.length > 0 && (
+              <ProposalCard
+                title={proposal.label}
+                detail={`${proposal.keys.length} ${proposal.keys.length === 1 ? 'pasajero' : 'pasajeros'}`}
+                total={proposal.total}
+                onConfirm={confirmProposal}
+                onCancel={clearProposal}
+              />
+            )}
 
-          <Section label="Cabina">
-            <SliderRow
-              label="Pitch base"
-              value={params.pitch}
-              unit=" m"
-              min={0.71}
-              max={0.92}
-              step={0.01}
-              onChange={(v) => setParams((p) => ({ ...p, pitch: v }))}
-            />
-            <SliderRow
-              label="Ocupación simulada"
-              value={params.occupancy}
-              unit="%"
-              min={0}
-              max={100}
-              step={1}
-              onChange={(v) => setParams((p) => ({ ...p, occupancy: v }))}
-            />
-          </Section>
+            <Section label="Ingresos">
+              <Row label="Selección de asiento" detail={fmtEUR(revenue)} strong />
+              <Row label="Avión lleno" detail={fmtEUR(potential)} />
+            </Section>
 
-          <Section
-            label="Herramientas"
-            plain
-            footnote="Arrastra para orbitar · rueda o pellizco para el zoom. La vista superior es tu plano de asientos."
-          >
-            <div className="t3d-tiles">
-              <Tile icon={icons.wing} label="¿Me toca ala?" active={wingView} onClick={() => setWingView((v) => !v)} />
-              <Tile icon={icons.trash} label="Reiniciar" onClick={resetAll} />
-            </div>
-          </Section>
-        </div>
+            <Section
+              label="Precios por zona"
+              footnote="Regular va incluido en la tarifa. Sin fila 13, como en los aviones reales."
+            >
+              {[
+                ['one', 'Space One'],
+                ['plus', 'Space Plus'],
+                ['space', 'Space · salida'],
+                ['front', 'Delanteros y traseros'],
+              ].map(([zc, label]) => (
+                <NumberRow
+                  key={zc}
+                  label={label}
+                  dot={ZONE_COLORS[zc]}
+                  value={prices[zc]}
+                  onChange={(v) => setPrices((p) => ({ ...p, [zc]: v }))}
+                />
+              ))}
+            </Section>
+          </div>
+        )}
+
+        {uiPref.tab === 'cabina' && (
+          <div className="t3d-tabpanel" key="cabina">
+            <Section label="Avión" plain footnote="Cada modelo guarda sus propias selecciones y ventas.">
+              <Segmented
+                label="Modelo de avión"
+                value={params.aircraft}
+                onChange={(id2) => setParams((p) => ({ ...p, aircraft: id2 }))}
+                options={Object.entries(AIRCRAFT).map(([id2, m2]) => ({ value: id2, label: m2.label }))}
+              />
+            </Section>
+            <Section label="Distribución">
+              <SliderRow
+                label="Pitch base"
+                value={params.pitch}
+                unit=" m"
+                min={0.71}
+                max={0.92}
+                step={0.01}
+                onChange={(v) => setParams((p) => ({ ...p, pitch: v }))}
+              />
+            </Section>
+            <Section label="Simulación" footnote="Marca asientos como vendidos al azar para ver el avión con pasaje.">
+              <SliderRow
+                label="Ocupación"
+                value={params.occupancy}
+                unit="%"
+                min={0}
+                max={100}
+                step={1}
+                onChange={(v) => setParams((p) => ({ ...p, occupancy: v }))}
+              />
+            </Section>
+          </div>
+        )}
+
+        {uiPref.tab === 'mas' && (
+          <div className="t3d-tabpanel" key="mas">
+            <Section label="Visualización" plain>
+              <div className="t3d-tiles">
+                <Tile icon={icons.wing} label="¿Me toca ala?" active={wingView} onClick={() => setWingView((v) => !v)} />
+                <Tile icon={icons.trash} label="Restablecer" onClick={resetAll} />
+              </div>
+            </Section>
+            <Section
+              label="Atajos de teclado"
+              footnote="Arrastra para orbitar, rueda o pellizco para el zoom. La vista superior es tu plano de asientos; arrastra sobre ellos para marcar varios."
+            >
+              <Row label="Seleccionar · Bloquear · Normal"><span className="t3d-kbd">1</span><span className="t3d-kbd">2</span><span className="t3d-kbd">3</span></Row>
+              <Row label="Ver desde el asiento"><span className="t3d-kbd">V</span></Row>
+              <Row label="Vista de cabina"><span className="t3d-kbd">H</span></Row>
+              <Row label="Mostrar u ocultar el panel"><span className="t3d-kbd">M</span></Row>
+              <Row label="Deshacer · Rehacer"><span className="t3d-kbd">⌘Z</span><span className="t3d-kbd">⇧⌘Z</span></Row>
+              <Row label="Cerrar · salir de la vista"><span className="t3d-kbd">Esc</span></Row>
+            </Section>
+          </div>
+        )}
       </Panel>
     </div>
   );
