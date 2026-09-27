@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
+  Ic, icons,
+} from './shared.jsx';
 
 // ============================================================================
 // Configurador 3D de cabina — modelo low-cost al estilo Vueling
@@ -52,79 +56,9 @@ const ZONE_COLORS = {
   regular: '#8d94a1',
 };
 
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-const hash01 = (str) => {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return (h >>> 8) / 16777216;
-};
-
 const DEFAULT_PARAMS = { aircraft: 'a320', pitch: 0.78, occupancy: 0 };
 const DEFAULT_PRICES = { one: 30, plus: 20, space: 15, front: 8 };
-
-// iconos outline
-const Ic = ({ children, size = 15, style }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    style={{ verticalAlign: '-2px', ...style }}
-  >
-    {children}
-  </svg>
-);
-const icons = {
-  menu: (
-    <>
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </>
-  ),
-  x: (
-    <>
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </>
-  ),
-  eye: (
-    <>
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-  wing: (
-    <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
-  ),
-  home: (
-    <>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </>
-  ),
-  back: (
-    <>
-      <line x1="19" y1="12" x2="5" y2="12" />
-      <polyline points="12 19 5 12 12 5" />
-    </>
-  ),
-  ticket: (
-    <>
-      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z" />
-      <line x1="7" y1="7" x2="7.01" y2="7" />
-    </>
-  ),
-};
+const STORAGE_KEY = 'ticketing3d.avion';
 
 export default function PlaneConfigurator({ onExit }) {
   const mountRef = useRef(null);
@@ -132,12 +66,24 @@ export default function PlaneConfigurator({ onExit }) {
   const markerLabelRef = useRef(null);
   const minimapRef = useRef(null);
   const T = useRef(null);
+  const initialRef = useRef(null);
+  if (initialRef.current === null) initialRef.current = readStorage(STORAGE_KEY) || {};
   const seatStates = useRef(new Map());
+  // estado por modelo: las claves "fila-índice" se repiten entre A319/A320/A321,
+  // así que cada avión guarda sus propias selecciones y ventas
+  const layoutsRef = useRef(initialRef.current.byAircraft || {});
+  const saveTimer = useRef(0);
   const modeRef = useRef('sel');
   const wingViewRef = useRef(false);
 
-  const [params, setParams] = useState(DEFAULT_PARAMS);
-  const [prices, setPrices] = useState(DEFAULT_PRICES);
+  const [params, setParams] = useState(() => ({
+    ...DEFAULT_PARAMS,
+    ...(initialRef.current.params || {}),
+  }));
+  const [prices, setPrices] = useState(() => ({
+    ...DEFAULT_PRICES,
+    ...(initialRef.current.prices || {}),
+  }));
   const [mode, setMode] = useState('sel');
   const [panelOpen, setPanelOpen] = useState(true);
   const [povUI, setPovUI] = useState(false);
@@ -149,7 +95,7 @@ export default function PlaneConfigurator({ onExit }) {
   const [buyN, setBuyN] = useState(2);
   const [buyPref, setBuyPref] = useState('best'); // 'best' | 'cheap'
   const [proposal, setProposal] = useState(null);
-  const [isNarrow, setIsNarrow] = useState(false);
+  const isNarrow = useNarrow();
 
   modeRef.current = mode;
 
@@ -806,7 +752,9 @@ export default function PlaneConfigurator({ onExit }) {
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
       el.removeEventListener('wheel', onWheel);
-      renderer.dispose();
+      disposeThree(scene, renderer, [
+        t.mats, t.seatTemplate, t.armTpl, t.blobTpl, t.marker, t.disposables,
+      ]);
       mount.removeChild(renderer.domElement);
       T.current = null;
     };
@@ -967,13 +915,6 @@ export default function PlaneConfigurator({ onExit }) {
     drawMinimap();
   }, [wingView, applySeatState, drawMinimap]);
 
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)');
-    const on = () => setIsNarrow(mq.matches);
-    on();
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
 
   // --------------------------------------------------------------------------
   // Regeneración de la cabina
@@ -984,6 +925,22 @@ export default function PlaneConfigurator({ onExit }) {
     const { scene, mats, unitBox, unitPlane } = t;
     const { aircraft, pitch, occupancy } = params;
     const model = AIRCRAFT[aircraft] || AIRCRAFT.a320;
+
+    // al cambiar de modelo, archivar el estado del anterior y cargar el suyo
+    const prevAircraft = t.lastAircraft;
+    const changed = prevAircraft !== aircraft;
+    if (changed) {
+      if (prevAircraft) {
+        layoutsRef.current[prevAircraft] = {
+          states: [...seatStates.current.entries()],
+          sold: [...t.soldSet],
+        };
+      }
+      const next = layoutsRef.current[aircraft] || {};
+      seatStates.current = new Map(next.states || []);
+      t.soldSet = new Set(next.sold || []);
+      t.lastAircraft = aircraft;
+    }
 
     for (const k of ['seatsGroup', 'cabinGroup']) {
       if (t[k]) { scene.remove(t[k]); t[k] = null; }
@@ -1282,8 +1239,6 @@ export default function PlaneConfigurator({ onExit }) {
 
     // animación al cambiar de avión: la cabina se estira hasta su nueva
     // longitud mientras la cámara vuela a encuadrarla
-    const changed = t.lastAircraft !== aircraft;
-    t.lastAircraft = aircraft;
     if (changed) {
       t.introStart = performance.now();
       cabinGroup.scale.z = 0.86;
@@ -1293,6 +1248,42 @@ export default function PlaneConfigurator({ onExit }) {
 
     recount();
   }, [params, applySeatState, recount]);
+
+  // autoguardado: modelo, precios y el estado de cada avión sobreviven al F5
+  useEffect(() => {
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      const t = T.current;
+      if (!t || !t.lastAircraft) return;
+      writeStorage(STORAGE_KEY, {
+        v: 1,
+        params,
+        prices,
+        byAircraft: {
+          ...layoutsRef.current,
+          [t.lastAircraft]: {
+            states: [...seatStates.current.entries()],
+            sold: [...t.soldSet],
+          },
+        },
+      });
+    }, 400);
+    return () => window.clearTimeout(saveTimer.current);
+  }, [params, prices, counts]);
+
+  const resetAll = () => {
+    if (!window.confirm('¿Restablecer la cabina y borrar las ventas de todos los aviones?')) return;
+    const t = T.current;
+    layoutsRef.current = {};
+    seatStates.current = new Map();
+    if (t) {
+      t.soldSet = new Set();
+      t.lastAircraft = null; // fuerza la recarga limpia del modelo actual
+    }
+    writeStorage(STORAGE_KEY, null);
+    setPrices(DEFAULT_PRICES);
+    setParams({ ...DEFAULT_PARAMS });
+  };
 
   // --------------------------------------------------------------------------
   // Compra: mejores N asientos contiguos (mismo bloque, sin cruzar pasillo)
@@ -1393,6 +1384,7 @@ export default function PlaneConfigurator({ onExit }) {
   const modeBtn = (m, label, color) => (
     <button
       key={m}
+      aria-pressed={mode === m}
       onClick={() => setMode(m)}
       style={{
         ...ui.modeBtn,
@@ -1470,7 +1462,7 @@ export default function PlaneConfigurator({ onExit }) {
       )}
 
       {!povUI && onExit && (
-        <button style={ui.exitBtn} title="Menú principal" onClick={onExit}>
+        <button style={ui.exitBtn} title="Menú principal" aria-label="Volver al menú principal" onClick={onExit}>
           <Ic size={18}>{icons.back}</Ic>
         </button>
       )}
@@ -1478,7 +1470,7 @@ export default function PlaneConfigurator({ onExit }) {
       {!povUI && (
         <button
           style={ui.homeBtn}
-          title="Vista de cabina (top)"
+          title="Vista de cabina (top)" aria-label="Volver a la vista cenital"
           onClick={() => T.current && T.current.goHome()}
         >
           <Ic size={19}>{icons.home}</Ic>
@@ -1488,6 +1480,8 @@ export default function PlaneConfigurator({ onExit }) {
       <canvas
         ref={minimapRef}
         onClick={onMinimapClick}
+        role="img"
+        aria-label="Plano de asientos: toca un asiento para marcarlo"
         style={{
           ...ui.minimap,
           display: isNarrow && panelOpen ? 'none' : 'block',
@@ -1501,6 +1495,9 @@ export default function PlaneConfigurator({ onExit }) {
             opacity: panelOpen ? 0 : 1,
             pointerEvents: panelOpen ? 'none' : 'auto',
           }}
+          aria-label="Abrir panel de configuración"
+          aria-hidden={panelOpen}
+          tabIndex={panelOpen ? -1 : 0}
           onClick={() => setPanelOpen(true)}
         >
           <Ic size={20}>{icons.menu}</Ic>
@@ -1514,7 +1511,7 @@ export default function PlaneConfigurator({ onExit }) {
               TICKETING<span style={{ color: '#3b82f6' }}>3D</span> · Cabina{' '}
               {model.label}
             </strong>
-            <button style={ui.closeBtn} onClick={() => setPanelOpen(false)}>
+            <button style={ui.closeBtn} aria-label="Cerrar panel" onClick={() => setPanelOpen(false)}>
               <Ic size={17}>{icons.x}</Ic>
             </button>
           </div>
@@ -1689,6 +1686,10 @@ export default function PlaneConfigurator({ onExit }) {
           >
             <Ic style={{ marginRight: 7 }}>{icons.wing}</Ic>
             ¿Me toca ala? — calidad de ventanilla
+          </button>
+          <button onClick={resetAll} style={ui.resetBtn}>
+            <Ic style={{ marginRight: 7 }}>{icons.trash}</Ic>
+            Reiniciar cabina
           </button>
 
           <div style={ui.help}>
@@ -1882,6 +1883,18 @@ const ui = {
     color: '#fff',
     cursor: 'pointer',
     fontSize: 13,
+    fontWeight: 600,
+    marginBottom: 8,
+  },
+  resetBtn: {
+    width: '100%',
+    padding: '10px 4px',
+    borderRadius: 9,
+    border: '1px solid rgba(255,255,255,.15)',
+    background: 'rgba(255,255,255,.06)',
+    color: '#c9c6cf',
+    cursor: 'pointer',
+    fontSize: 12.5,
     fontWeight: 600,
     marginBottom: 8,
   },

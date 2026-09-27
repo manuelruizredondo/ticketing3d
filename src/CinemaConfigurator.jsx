@@ -4,6 +4,10 @@ import React, {
 import * as THREE from 'three';
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import {
+  easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
+  Ic, icons,
+} from './shared.jsx';
 
 // ============================================================================
 // Configurador 3D de sala de cine — Cinemes Full HD (Centre Splau)
@@ -35,20 +39,6 @@ const AISLE_W = 1.1;
 const FLY_MS = 1100;
 const STORAGE_KEY = 'ticketing3d.sala';
 
-const easeInOutCubic = (t) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-// hash determinista → [0,1). Con él la ocupación simulada es estable: subir
-// el slider añade butacas vendidas sin cambiar las que ya lo estaban.
-const hash01 = (str) => {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return (h >>> 8) / 16777216;
-};
-
 const DEFAULT_PARAMS = {
   rows: 12,
   cols: 16,
@@ -63,146 +53,23 @@ const DEFAULT_PARAMS = {
 };
 const DEFAULT_PRICES = { std: 8.5, vip: 13.5 };
 
+// base64 de texto UTF-8 (produce lo mismo que el antiguo btoa(unescape(…)),
+// así los enlaces ya compartidos siguen abriendo)
+const utf8ToBase64 = (str) => {
+  let bin = '';
+  new TextEncoder().encode(str).forEach((b) => { bin += String.fromCharCode(b); });
+  return btoa(bin);
+};
+const base64ToUtf8 = (b64) =>
+  new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+
 // configuración inicial: hash de la URL (#c=...) > localStorage > defaults
 const loadInitial = () => {
   try {
     const m = window.location.hash.match(/c=([^&]+)/);
-    if (m) {
-      return JSON.parse(
-        decodeURIComponent(escape(atob(decodeURIComponent(m[1]))))
-      );
-    }
+    if (m) return JSON.parse(base64ToUtf8(decodeURIComponent(m[1])));
   } catch (err) { /* hash corrupto: se ignora */ }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (err) { /* storage no disponible */ }
-  return {};
-};
-
-// iconos outline (trazo, sin relleno — estilo Feather)
-const Ic = ({ children, size = 15, style }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    style={{ verticalAlign: '-2px', ...style }}
-  >
-    {children}
-  </svg>
-);
-const icons = {
-  menu: (
-    <>
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </>
-  ),
-  x: (
-    <>
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </>
-  ),
-  eye: (
-    <>
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-  target: (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
-    </>
-  ),
-  volOff: (
-    <>
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <line x1="23" y1="9" x2="17" y2="15" />
-      <line x1="17" y1="9" x2="23" y2="15" />
-    </>
-  ),
-  volOn: (
-    <>
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-    </>
-  ),
-  download: (
-    <>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </>
-  ),
-  upload: (
-    <>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" y1="3" x2="12" y2="15" />
-    </>
-  ),
-  home: (
-    <>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </>
-  ),
-  back: (
-    <>
-      <line x1="19" y1="12" x2="5" y2="12" />
-      <polyline points="12 19 5 12 12 5" />
-    </>
-  ),
-  undo: (
-    <>
-      <polyline points="1 4 1 10 7 10" />
-      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-    </>
-  ),
-  redo: (
-    <>
-      <polyline points="23 4 23 10 17 10" />
-      <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" />
-    </>
-  ),
-  play: <polygon points="5 3 19 12 5 21 5 3" />,
-  camera: (
-    <>
-      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-      <circle cx="12" cy="13" r="4" />
-    </>
-  ),
-  share: (
-    <>
-      <circle cx="18" cy="5" r="3" />
-      <circle cx="6" cy="12" r="3" />
-      <circle cx="18" cy="19" r="3" />
-      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-    </>
-  ),
-  trash: (
-    <>
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </>
-  ),
-  ticket: (
-    <>
-      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z" />
-      <line x1="7" y1="7" x2="7.01" y2="7" />
-    </>
-  ),
+  return readStorage(STORAGE_KEY) || {};
 };
 
 export default function CinemaConfigurator({ onExit }) {
@@ -244,7 +111,7 @@ export default function CinemaConfigurator({ onExit }) {
   const [proposal, setProposal] = useState(null); // {keys, total, label}
   const [tourUI, setTourUI] = useState(false);
   const [shareMsg, setShareMsg] = useState('');
-  const [isNarrow, setIsNarrow] = useState(false);
+  const isNarrow = useNarrow();
 
   modeRef.current = mode;
 
@@ -719,7 +586,8 @@ export default function CinemaConfigurator({ onExit }) {
       renderer, scene, camera, mats, unitBox, unitPlane, video, videoTex,
       projLight, spot, screenGroup, buildScreen, posAudio, listener,
       stdTemplate: buildStandardTemplate(),
-      vipTemplate: buildVipFallbackTemplate(),
+      vipTemplate: null, // se asigna justo debajo (fallback) o al cargar el .dae
+      vipFallback: null,
       vipModel: 'proc', // 'proc' | 'dae'
       vipBaseMats: {}, // nombre de mesh -> material original del dae
       seatsGroup: null, standGroup: null, roomGroup: null, signsGroup: null,
@@ -757,6 +625,8 @@ export default function CinemaConfigurator({ onExit }) {
       pinchDist: 0,
       raf: 0,
     };
+    T.current.vipFallback = buildVipFallbackTemplate();
+    T.current.vipTemplate = T.current.vipFallback;
 
     // ---- carga del modelo VIP real (butacavip.dae) ---------------------------
     const daeLoader = new ColladaLoader();
@@ -1295,7 +1165,10 @@ export default function CinemaConfigurator({ onExit }) {
       if (posAudio) {
         try { posAudio.disconnect(); } catch (err) { /* ya desconectado */ }
       }
-      renderer.dispose();
+      disposeThree(scene, renderer, [
+        t.mats, t.stdTemplate, t.vipTemplate, t.vipFallback, t.labelCache,
+        videoTex, texLogoScreen, t.disposables,
+      ]);
       mount.removeChild(renderer.domElement);
       T.current = null;
     };
@@ -1455,23 +1328,13 @@ export default function CinemaConfigurator({ onExit }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  // media query móvil: el panel pasa a hoja inferior
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 640px)');
-    const on = () => setIsNarrow(mq.matches);
-    on();
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
-
   // autoguardado en localStorage (la config sobrevive al F5)
   useEffect(() => {
     window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serialize()));
-      } catch (err) { /* storage lleno o bloqueado */ }
-    }, 400);
+    saveTimer.current = window.setTimeout(
+      () => writeStorage(STORAGE_KEY, serialize()),
+      400
+    );
     return () => window.clearTimeout(saveTimer.current);
   }, [params, prices, counts, serialize]);
 
@@ -1977,7 +1840,7 @@ export default function CinemaConfigurator({ onExit }) {
   const shareLink = () => {
     try {
       const json = JSON.stringify(serialize());
-      const b64 = encodeURIComponent(btoa(unescape(encodeURIComponent(json))));
+      const b64 = encodeURIComponent(utf8ToBase64(json));
       const url = `${window.location.origin}${window.location.pathname}#c=${b64}`;
       window.history.replaceState(null, '', `#c=${b64}`);
       const done = () => {
@@ -1997,8 +1860,8 @@ export default function CinemaConfigurator({ onExit }) {
     pushHistory();
     seatStates.current = new Map();
     if (T.current) T.current.soldSet = new Set();
-    try { window.localStorage.removeItem(STORAGE_KEY); } catch (err) { /* noop */ }
-    window.history.replaceState(null, '', window.location.pathname);
+    writeStorage(STORAGE_KEY, null);
+    window.history.replaceState(null, '', `${window.location.pathname}#/cine`);
     setPrices(DEFAULT_PRICES);
     setParams({ ...DEFAULT_PARAMS });
     setRegenTick((k) => k + 1);
@@ -2043,6 +1906,7 @@ export default function CinemaConfigurator({ onExit }) {
   const modeBtn = (m, label, color) => (
     <button
       key={m}
+      aria-pressed={mode === m}
       onClick={() => setMode(m)}
       style={{
         ...ui.modeBtn,
@@ -2115,7 +1979,7 @@ export default function CinemaConfigurator({ onExit }) {
 
       {/* salir al menú principal (arriba izquierda) */}
       {!povUI && onExit && (
-        <button style={ui.exitBtn} title="Menú principal" onClick={onExit}>
+        <button style={ui.exitBtn} title="Menú principal" aria-label="Volver al menú principal" onClick={onExit}>
           <Ic size={18}>{icons.back}</Ic>
         </button>
       )}
@@ -2124,7 +1988,7 @@ export default function CinemaConfigurator({ onExit }) {
       {!povUI && (
         <button
           style={ui.homeBtn}
-          title="Vista general (top)"
+          title="Vista general (top)" aria-label="Volver a la vista cenital"
           onClick={() => T.current && T.current.goHome()}
         >
           <Ic size={19}>{icons.home}</Ic>
@@ -2135,6 +1999,8 @@ export default function CinemaConfigurator({ onExit }) {
       <canvas
         ref={minimapRef}
         onClick={onMinimapClick}
+        role="img"
+        aria-label="Plano de asientos: toca un asiento para marcarlo"
         style={{
           ...ui.minimap,
           display: isNarrow && panelOpen ? 'none' : 'block',
@@ -2149,6 +2015,9 @@ export default function CinemaConfigurator({ onExit }) {
             opacity: panelOpen ? 0 : 1,
             pointerEvents: panelOpen ? 'none' : 'auto',
           }}
+          aria-label="Abrir panel de configuración"
+          aria-hidden={panelOpen}
+          tabIndex={panelOpen ? -1 : 0}
           onClick={() => setPanelOpen(true)}
         >
           <Ic size={20}>{icons.menu}</Ic>
@@ -2162,7 +2031,7 @@ export default function CinemaConfigurator({ onExit }) {
             <strong style={{ letterSpacing: '.5px' }}>
               CINEMES <span style={{ color: '#d8232a' }}>FULL HD</span> · Sala 3D
             </strong>
-            <button style={ui.closeBtn} onClick={() => setPanelOpen(false)}>
+            <button style={ui.closeBtn} aria-label="Cerrar panel" onClick={() => setPanelOpen(false)}>
               <Ic size={17}>{icons.x}</Ic>
             </button>
           </div>
