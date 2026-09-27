@@ -1,20 +1,73 @@
-import React, { useState } from 'react';
-import CinemaConfigurator from './CinemaConfigurator.jsx';
-import PlaneConfigurator from './PlaneConfigurator.jsx';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
+
+// cada configurador (y three.js con él) se descarga solo al entrar en él
+const CinemaConfigurator = lazy(() => import('./CinemaConfigurator.jsx'));
+const PlaneConfigurator = lazy(() => import('./PlaneConfigurator.jsx'));
 
 // ============================================================================
 // Página de entrada: elige experiencia (cine o avión).
-// Si la URL trae una configuración compartida de sala (#c=...), entra
-// directamente al cine para restaurarla.
+// Rutas por hash: #/cine y #/avion, para que recargar mantenga la experiencia
+// y el botón "atrás" del navegador vuelva a esta página. Una configuración de
+// sala compartida (#c=...) entra directamente al cine para restaurarla.
 // ============================================================================
 
-export default function App() {
-  const [app, setApp] = useState(() =>
-    window.location.hash.includes('c=') ? 'cine' : null
-  );
+const routeFromHash = () => {
+  const h = window.location.hash;
+  if (h.startsWith('#/avion')) return 'avion';
+  if (h.startsWith('#/cine') || h.includes('c=')) return 'cine';
+  return null;
+};
 
-  if (app === 'cine') return <CinemaConfigurator onExit={() => setApp(null)} />;
-  if (app === 'avion') return <PlaneConfigurator onExit={() => setApp(null)} />;
+const TITLES = {
+  cine: 'Sala de cine · Ticketing3D',
+  avion: 'Cabina de avión · Ticketing3D',
+};
+
+const Loader = ({ label }) => (
+  <div style={st.loader} role="status">
+    <div className="t3d-spin" style={st.spinner} />
+    <span>{label}</span>
+  </div>
+);
+
+export default function App() {
+  const [app, setApp] = useState(routeFromHash);
+
+  useEffect(() => {
+    const onHash = () => setApp(routeFromHash());
+    window.addEventListener('hashchange', onHash);
+    window.addEventListener('popstate', onHash);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('popstate', onHash);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.title = TITLES[app] || 'Ticketing3D · Elige tu asiento en 3D';
+  }, [app]);
+
+  const go = (route) => {
+    const hash = route ? `#/${route}` : '';
+    if (hash === window.location.hash) return;
+    if (route) window.location.hash = hash;
+    else {
+      // volver a la landing sin dejar un "#" colgando en la URL
+      window.history.pushState(null, '', window.location.pathname);
+    }
+    setApp(route);
+  };
+
+  if (app) {
+    const Comp = app === 'cine' ? CinemaConfigurator : PlaneConfigurator;
+    return (
+      <Suspense
+        fallback={<Loader label={app === 'cine' ? 'Preparando la sala…' : 'Preparando la cabina…'} />}
+      >
+        <Comp onExit={() => go(null)} />
+      </Suspense>
+    );
+  }
 
   return (
     <div style={st.page}>
@@ -43,7 +96,7 @@ export default function App() {
         <button
           className="t3d-card cine"
           style={{ ...st.card, ...st.cardCine }}
-          onClick={() => setApp('cine')}
+          onClick={() => go('cine')}
         >
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#ff6b70" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <rect x="2" y="7" width="20" height="15" rx="2" />
@@ -69,7 +122,7 @@ export default function App() {
         <button
           className="t3d-card avion"
           style={{ ...st.card, ...st.cardAvion }}
-          onClick={() => setApp('avion')}
+          onClick={() => go('avion')}
         >
           <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#7ab5ff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M17.8 19.2L16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
@@ -182,4 +235,24 @@ const st = {
     transition: 'opacity .25s, transform .25s',
   },
   footer: { opacity: 0.35, fontSize: 12 },
+  loader: {
+    position: 'fixed',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    background: '#0b0a0e',
+    color: 'rgba(232,230,236,.7)',
+    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
+    fontSize: 14,
+  },
+  spinner: {
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    border: '3px solid rgba(255,255,255,.12)',
+    borderTopColor: '#d8232a',
+  },
 };

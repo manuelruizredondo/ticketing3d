@@ -3,14 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Configurador 3D · Cinemes Full HD Splau</title>
+    <title>Ticketing3D · Elige tu asiento en 3D</title>
+    <meta name="description" content="Configuradores 3D de sala de cine y cabina de avión: elige asiento viendo lo que ves desde él, con zonas, precios y mejores asientos juntos." />
+    <meta name="theme-color" content="#0b0a0e" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Ticketing3D · Elige tu asiento en 3D" />
+    <meta property="og:description" content="Sala de cine y cabina de avión en 3D con vista real desde cada asiento." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <style>
       html, body, #root { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0a0e; }
       * { box-sizing: border-box; }
+      /* foco visible solo al navegar con teclado */
+      button:focus-visible, input:focus-visible, select:focus-visible, canvas:focus-visible {
+        outline: 2px solid #7ab5ff;
+        outline-offset: 2px;
+      }
+      @keyframes t3d-spin { to { transform: rotate(360deg); } }
+      .t3d-spin { animation: t3d-spin .8s linear infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          transition-duration: .01ms !important;
+          animation-duration: .01ms !important;
+        }
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>Ticketing3D necesita JavaScript y WebGL.</noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
