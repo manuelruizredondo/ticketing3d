@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
   Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
@@ -22,7 +23,12 @@ import {
 // el cielo, las nubes y el ala — lo que compras de verdad al elegir asiento.
 // ============================================================================
 
-const R_FUS = 2.4;
+const R_FUS = 2.4; // radio interior (forro de cabina)
+const R_OUT = 2.52; // radio exterior del casco
+// altura del corte de la maqueta: por encima de respaldos y ventanillas.
+// En la vista desde el asiento el corte sube y el techo se cierra.
+const CUT_Y = 1.72;
+const CUT_CLOSED = 6;
 const YC = 1.35;
 const WIN_Y = 1.18; // centro de ventanilla a la altura del hombro sentado
 const WIN_EVERY = 0.55;
@@ -180,23 +186,49 @@ export default function PlaneConfigurator({ onExit }) {
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.0;
+    renderer.localClippingEnabled = true;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.touchAction = 'none';
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x9ec7ea);
-    scene.fog = new THREE.Fog(0xbcd9f0, 60, 220);
+    // cielo: degradado vertical de azul profundo a horizonte claro
+    const skyCv = document.createElement('canvas');
+    skyCv.width = 2;
+    skyCv.height = 256;
+    const skctx = skyCv.getContext('2d');
+    const skg = skctx.createLinearGradient(0, 0, 0, 256);
+    skg.addColorStop(0, '#3f7ed0');
+    skg.addColorStop(0.55, '#8dbbe8');
+    skg.addColorStop(1, '#d7e8f6');
+    skctx.fillStyle = skg;
+    skctx.fillRect(0, 0, 2, 256);
+    const skyTex = new THREE.CanvasTexture(skyCv);
+    skyTex.encoding = THREE.sRGBEncoding;
+    scene.background = skyTex;
+    scene.fog = new THREE.Fog(0xc4dcf2, 70, 240);
 
     const camera = new THREE.PerspectiveCamera(
       55, mount.clientWidth / mount.clientHeight, 0.1, 400
     );
 
-    scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x9a917f, 0.95));
-    const sun = new THREE.DirectionalLight(0xfff2dd, 0.75);
+    scene.add(new THREE.HemisphereLight(0xdcebff, 0x8a8f99, 0.5));
+    const sun = new THREE.DirectionalLight(0xfff4e2, 1.1);
     sun.position.set(30, 40, 10);
     scene.add(sun);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+    // iluminación de estudio para reflejos en la pintura y el metal
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const room = new RoomEnvironment();
+    const envRT = pmrem.fromScene(room, 0.04);
+    const envTex = envRT.texture;
+    scene.environment = envTex;
+    pmrem.dispose();
+    disposeThree(room, null);
+
+    // plano de corte de la maqueta (ver CUT_Y)
+    const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), CUT_Y);
+    const clip = [cutPlane];
 
     // ---- texturas procedurales ------------------------------------------------
     const winCv = document.createElement('canvas');
@@ -217,6 +249,56 @@ export default function PlaneConfigurator({ onExit }) {
     }
     const winAlpha = new THREE.CanvasTexture(winCv);
     winAlpha.wrapS = winAlpha.wrapT = THREE.RepeatWrapping;
+
+    // forro interior: bisel hundido alrededor de cada ventanilla (mismo
+    // trazado que winAlpha; u = perímetro, v = a lo largo de la cabina)
+    const linCv = document.createElement('canvas');
+    linCv.width = 1024;
+    linCv.height = 512;
+    const lnctx = linCv.getContext('2d');
+    lnctx.fillStyle = '#e7eaef';
+    lnctx.fillRect(0, 0, 1024, 512);
+    for (const cx of [244, 780]) {
+      lnctx.save();
+      lnctx.translate(cx, 256);
+      lnctx.scale(1, 205 / 28); // óvalo: el eje largo va a lo largo de la cabina
+      const bz = lnctx.createRadialGradient(0, 0, 14, 0, 0, 28);
+      bz.addColorStop(0, '#b9bfc8');
+      bz.addColorStop(0.55, '#d3d8df');
+      bz.addColorStop(1, 'rgba(231,234,239,0)');
+      lnctx.fillStyle = bz;
+      lnctx.beginPath();
+      lnctx.arc(0, 0, 28, 0, Math.PI * 2);
+      lnctx.fill();
+      lnctx.restore();
+    }
+    const linerTex = new THREE.CanvasTexture(linCv);
+    linerTex.encoding = THREE.sRGBEncoding;
+    linerTex.wrapS = linerTex.wrapT = THREE.RepeatWrapping;
+
+    const livCv = document.createElement('canvas');
+    livCv.width = 1024;
+    livCv.height = 8;
+    const lvctx = livCv.getContext('2d');
+    const lvg = lvctx.createLinearGradient(0, 0, 1024, 0);
+    lvg.addColorStop(0, '#c2c7ce');
+    lvg.addColorStop(0.15, '#c2c7ce');
+    lvg.addColorStop(0.172, '#f6f7f9');
+    lvg.addColorStop(0.828, '#f6f7f9');
+    lvg.addColorStop(0.85, '#c2c7ce');
+    lvg.addColorStop(1, '#c2c7ce');
+    lvctx.fillStyle = lvg;
+    lvctx.fillRect(0, 0, 1024, 8);
+    // línea de librea bajo las ventanillas, a ambos costados
+    lvctx.fillStyle = '#1e3a8a';
+    lvctx.fillRect(0.19 * 1024, 0, 0.014 * 1024, 8);
+    lvctx.fillRect(0.796 * 1024, 0, 0.014 * 1024, 8);
+    lvctx.fillStyle = '#3b82f6';
+    lvctx.fillRect(0.207 * 1024, 0, 0.004 * 1024, 8);
+    lvctx.fillRect(0.789 * 1024, 0, 0.004 * 1024, 8);
+    const livery = new THREE.CanvasTexture(livCv);
+    livery.encoding = THREE.sRGBEncoding;
+    livery.wrapS = livery.wrapT = THREE.RepeatWrapping;
 
     const cloudCv = document.createElement('canvas');
     cloudCv.width = cloudCv.height = 128;
@@ -280,30 +362,59 @@ export default function PlaneConfigurator({ onExit }) {
     const aoSeatTex = new THREE.CanvasTexture(aoSeatCv);
 
     // ---- materiales -----------------------------------------------------------
-    const mkStd = (opts) => new THREE.MeshStandardMaterial(opts);
+    // interior: apenas reflejo de entorno (lo reserva para la pintura exterior)
+    // para que los asientos contrasten sobre la moqueta en el plano cenital
+    const mkStd = (opts) => new THREE.MeshStandardMaterial({ envMapIntensity: 0.15, ...opts });
+    const srgb = (hex) => new THREE.Color(hex).convertSRGBToLinear();
     const mats = {
       liner: mkStd({
-        color: 0xe4e8ee, roughness: 0.92, side: THREE.BackSide,
-        alphaMap: winAlpha, alphaTest: 0.5,
+        map: linerTex, roughness: 0.92, side: THREE.BackSide,
+        alphaMap: winAlpha, alphaTest: 0.5, clippingPlanes: clip,
       }),
       glass: new THREE.MeshBasicMaterial({
         color: 0xcfe6fa, transparent: true, opacity: 0.16, depthWrite: false,
+        clippingPlanes: clip,
+      }),
+      // casco exterior: pintura con barniz y ventanillas recortadas
+      shell: new THREE.MeshPhysicalMaterial({
+        map: livery, alphaMap: winAlpha, alphaTest: 0.5,
+        roughness: 0.32, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.18,
+        clippingPlanes: clip,
+      }),
+      paint: new THREE.MeshPhysicalMaterial({
+        color: srgb(0xf4f6f8), roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.18,
+      }),
+      tailPaint: new THREE.MeshPhysicalMaterial({
+        color: srgb(0x1e3a8a), roughness: 0.3, clearcoat: 0.8, clearcoatRoughness: 0.15,
+      }),
+      cockpit: new THREE.MeshPhysicalMaterial({
+        color: srgb(0x0e131b), roughness: 0.06, metalness: 0.3, clearcoat: 1,
+      }),
+      rim: mkStd({ color: srgb(0xdde1e6), roughness: 0.7 }),
+      fan: mkStd({ color: srgb(0x2a2e36), metalness: 0.6, roughness: 0.45 }),
+      // tintado de ventanillas visible solo desde fuera (cara hacia el exterior)
+      winTint: new THREE.MeshBasicMaterial({
+        color: srgb(0x131a26), transparent: true, opacity: 0.72, clippingPlanes: clip,
       }),
       floor: mkStd({ color: 0x9aa0ab, roughness: 0.95 }), // moqueta clara
       aisle: mkStd({ color: 0x4a5160, roughness: 0.95 }),
-      bin: mkStd({ color: 0xdadfe6, roughness: 0.85 }),
+      bin: mkStd({ color: 0xdadfe6, roughness: 0.85, clippingPlanes: clip }),
       bulkhead: mkStd({ color: 0xd6dbe2, roughness: 0.9 }),
-      lightStrip: mkStd({ color: 0xf5f2ea, emissive: 0xfff3df, emissiveIntensity: 0.9 }),
+      lightStrip: mkStd({
+        color: 0xf5f2ea, emissive: 0xfff3df, emissiveIntensity: 0.9, clippingPlanes: clip,
+      }),
       seat: mkStd({ color: 0x3a4356, roughness: 0.9 }), // tapizado gris oscuro
       metal: mkStd({ color: 0x9aa0a8, metalness: 0.8, roughness: 0.4 }),
       selMark: mkStd({ color: 0x1f9d55, emissive: 0x2f9e44, emissiveIntensity: 0.25, roughness: 0.85 }),
       blocked: mkStd({ color: 0x8b919c, roughness: 0.95 }),
       sold: mkStd({ color: 0x23262e, roughness: 0.95 }),
       proposal: mkStd({ color: 0x1f9d55, emissive: 0x34d399, emissiveIntensity: 0.5, roughness: 0.8 }),
-      wing: mkStd({ color: 0xc9ced6, metalness: 0.55, roughness: 0.35, side: THREE.DoubleSide }),
-      engine: mkStd({ color: 0xb8bec7, metalness: 0.6, roughness: 0.35 }),
+      wing: new THREE.MeshPhysicalMaterial({
+        color: srgb(0xc9ced6), metalness: 0.3, roughness: 0.38, clearcoat: 0.35,
+      }),
+      engine: mkStd({ color: 0xb8bec7, metalness: 0.75, roughness: 0.3 }),
       intake: mkStd({ color: 0x1c1f26, roughness: 0.6 }),
-      exit: new THREE.MeshBasicMaterial({ map: exitTex, toneMapped: false }),
+      exit: new THREE.MeshBasicMaterial({ map: exitTex, toneMapped: false, clippingPlanes: clip }),
       heat: [
         mkStd({ color: 0x2f9e44, emissive: 0x2f9e44, emissiveIntensity: 0.3, roughness: 0.85 }),
         mkStd({ color: 0xe8a013, emissive: 0xe8a013, emissiveIntensity: 0.3, roughness: 0.85 }),
@@ -320,8 +431,6 @@ export default function PlaneConfigurator({ onExit }) {
       aoSeat: new THREE.MeshBasicMaterial({
         map: aoSeatTex, transparent: true, depthWrite: false,
       }),
-      plan: mkStd({ color: 0xd9dde3, roughness: 0.9, side: THREE.DoubleSide }),
-      planDark: mkStd({ color: 0x8f959e, roughness: 0.9, side: THREE.DoubleSide }),
       // reposacabezas de color por zona tarifaria (como las fundas reales)
       zone: {
         one: mkStd({ color: 0xf2d21f, roughness: 0.85 }),
@@ -334,6 +443,24 @@ export default function PlaneConfigurator({ onExit }) {
 
     const unitBox = new THREE.BoxGeometry(1, 1, 1);
     const unitPlane = new THREE.PlaneGeometry(1, 1);
+
+    // mar de nubes muy por debajo: cúmulos que la niebla funde con el horizonte
+    const deckMat = new THREE.SpriteMaterial({
+      map: cloudTex, opacity: 0.6, depthWrite: false, fog: true,
+    });
+    const deckClouds = [];
+    for (let i = 0; i < 90; i++) {
+      const sp = new THREE.Sprite(deckMat);
+      const sc = 26 + hash01(`dk${i}c`) * 46;
+      sp.position.set(
+        (hash01(`dk${i}a`) - 0.5) * 420,
+        -40 - hash01(`dk${i}d`) * 12,
+        (hash01(`dk${i}b`) - 0.5) * 420
+      );
+      sp.scale.set(sc, sc * 0.7, 1);
+      scene.add(sp);
+      deckClouds.push(sp);
+    }
 
     // nubes exteriores
     const clouds = [];
@@ -444,12 +571,14 @@ export default function PlaneConfigurator({ onExit }) {
 
     T.current = {
       renderer, scene, camera, mats, unitBox, unitPlane, sun, clouds, winAlpha,
+      livery, linerTex, envTex, cutPlane, cutTarget: CUT_Y,
       armTpl, blobTpl,
       seatTemplate: buildSeat(),
       seatsGroup: null, cabinGroup: null,
       seatList: [],
       seatByKey: new Map(),
       rowMeta: new Map(),
+      rims: [],
       occupiedSet: new Set(),
       soldSet: new Set(),
       proposal: new Set(),
@@ -543,6 +672,7 @@ export default function PlaneConfigurator({ onExit }) {
         u.kind === 'ventanilla'
           ? new THREE.Vector3(Math.sign(p.x) * 9, WIN_Y - 0.45, p.z - 0.6)
           : new THREE.Vector3(p.x * 0.3, 1.3, p.z - 8);
+      t.cutTarget = CUT_CLOSED;
       flyTo(eye, tgt, () => {
         t.pov.active = true;
         t.pov.eye.copy(eye);
@@ -563,6 +693,7 @@ export default function PlaneConfigurator({ onExit }) {
       t.orbit.radius = home.radius;
       t.orbit.target.copy(home.target);
       setPovUI(false);
+      t.cutTarget = CUT_Y;
       flyTo(orbitPos(t.orbit), t.orbit.target, () => {
         t.pov.active = false;
       });
@@ -750,6 +881,19 @@ export default function PlaneConfigurator({ onExit }) {
         applyViewOffset();
       }
 
+      // corte de la maqueta: baja al plano abierto, sube en la vista de asiento
+      const cp = t.cutPlane;
+      if (cp.constant !== t.cutTarget) {
+        cp.constant += (t.cutTarget - cp.constant) * 0.09;
+        if (Math.abs(t.cutTarget - cp.constant) < 0.01) cp.constant = t.cutTarget;
+        // el canto solo existe mientras la maqueta está abierta
+        if (t.rims) for (const r of t.rims) r.visible = cp.constant < CUT_Y + 0.05;
+      }
+      for (const c of deckClouds) {
+        c.position.z += 0.05;
+        if (c.position.z > 210) c.position.z -= 420;
+      }
+
       for (const c of clouds) {
         c.position.z += 0.028;
         if (c.position.z > t.cabin.zEnd + 60) c.position.z -= 150;
@@ -842,6 +986,7 @@ export default function PlaneConfigurator({ onExit }) {
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
       el.removeEventListener('wheel', onWheel);
+      envRT.dispose(); // el mapa de entorno vive en su propio render target
       disposeThree(scene, renderer, [
         t.mats, t.seatTemplate, t.armTpl, t.blobTpl, t.marker, t.disposables,
       ]);
@@ -1169,12 +1314,46 @@ export default function PlaneConfigurator({ onExit }) {
     }
 
     // ---- cabina ---------------------------------------------------------------
-    const fusGeo = mkGeo(new THREE.CylinderGeometry(R_FUS, R_FUS, len, 48, 1, true));
+    // forro interior (visto por dentro) y casco exterior pintado, ambos con
+    // las ventanillas recortadas y cortados a la altura CUT_Y
+    const fusGeo = mkGeo(new THREE.CylinderGeometry(R_FUS, R_FUS, len, 64, 1, true));
     fusGeo.rotateX(Math.PI / 2);
     t.winAlpha.repeat.set(1, len / WIN_EVERY);
+    // con map + alphaMap el material usa la transformación UV del map
+    t.livery.repeat.set(1, len / WIN_EVERY);
+    t.linerTex.repeat.set(1, len / WIN_EVERY);
     const fus = new THREE.Mesh(fusGeo, mats.liner);
     fus.position.set(0, YC, Z_FRONT + len / 2);
     cabinGroup.add(fus);
+    const shellGeo = mkGeo(new THREE.CylinderGeometry(R_OUT, R_OUT, len, 64, 1, true));
+    shellGeo.rotateX(Math.PI / 2);
+    const shell = new THREE.Mesh(shellGeo, mats.shell);
+    shell.position.copy(fus.position);
+    cabinGroup.add(shell);
+    for (const sx of [-1, 1]) {
+      const tint = new THREE.Mesh(unitPlane, mats.winTint);
+      tint.scale.set(len, 0.56, 1);
+      tint.rotation.y = (sx * Math.PI) / 2; // mira hacia fuera
+      // entre forro y casco en toda su altura (el casco es curvo: más fuera
+      // asomaría por el borde inferior)
+      tint.position.set(sx * (R_OUT - 0.08), WIN_Y, Z_FRONT + len / 2);
+      cabinGroup.add(tint);
+    }
+    // canto del corte: tapa el grosor entre forro y casco en ambos costados
+    {
+      const dy = CUT_Y - YC;
+      const xi = Math.sqrt(R_FUS * R_FUS - dy * dy);
+      const xo = Math.sqrt(R_OUT * R_OUT - dy * dy);
+      t.rims = [];
+      for (const sx of [-1, 1]) {
+        const rim = new THREE.Mesh(unitBox, mats.rim);
+        rim.scale.set(xo - xi + 0.01, 0.025, len);
+        rim.position.set(sx * (xi + xo) / 2, CUT_Y - 0.0125, Z_FRONT + len / 2);
+        rim.visible = t.cutPlane.constant < CUT_Y + 0.05;
+        cabinGroup.add(rim);
+        t.rims.push(rim);
+      }
+    }
 
     for (const sx of [-1, 1]) {
       const strip = new THREE.Mesh(unitPlane, mats.glass);
@@ -1217,11 +1396,11 @@ export default function PlaneConfigurator({ onExit }) {
       cabinGroup.add(strip);
     }
 
-    const bhGeoF = mkGeo(new THREE.CircleGeometry(R_FUS, 40));
+    const bhGeoF = mkGeo(new THREE.CircleGeometry(R_OUT, 56));
     const bhF = new THREE.Mesh(bhGeoF, mats.bulkhead);
     bhF.position.set(0, YC, Z_FRONT);
     cabinGroup.add(bhF);
-    const bhGeoB = mkGeo(new THREE.CircleGeometry(R_FUS, 40));
+    const bhGeoB = mkGeo(new THREE.CircleGeometry(R_OUT, 56));
     const bhB = new THREE.Mesh(bhGeoB, mats.bulkhead);
     bhB.position.set(0, YC, zEnd);
     bhB.rotation.y = Math.PI;
@@ -1238,98 +1417,189 @@ export default function PlaneConfigurator({ onExit }) {
       }
     }
 
-    // ala trapezoidal en flecha que nace del fuselaje (la raíz queda dentro
-    // del tubo, así el encuentro ala-fuselaje se ve continuo)
+    // ---- exterior en 3D: alas, motores, morro y cola ----------------------------
+    // desplaza en Y cada vértice según su posición t ∈ [0,1] a lo largo de la pieza
+    const bendY = (geo, len2, dir, fn) => {
+      const pos = geo.getAttribute('position');
+      for (let i = 0; i < pos.count; i++) {
+        const tt = THREE.MathUtils.clamp((dir * pos.getZ(i)) / len2, 0, 1);
+        pos.setY(i, pos.getY(i) + fn(tt));
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    };
+
+    // morro: ojiva con el eje caído hacia la punta y parabrisas oscuro
+    const L_NOSE = 4.8;
+    const noseR = (tt) => R_OUT * Math.sqrt(Math.max(0, 1 - Math.pow(tt, 2.2)));
+    const noseDroop = (tt) => -0.6 * tt * tt;
+    const nosePts = [];
+    for (let i = 0; i <= 28; i++) {
+      const tt = i / 28;
+      nosePts.push(new THREE.Vector2(Math.max(0.002, noseR(tt)), tt * L_NOSE));
+    }
+    const noseGeo = mkGeo(new THREE.LatheGeometry(nosePts, 56));
+    noseGeo.rotateX(-Math.PI / 2); // +y → -z: la punta mira hacia delante
+    bendY(noseGeo, L_NOSE, -1, noseDroop);
+    const nose = new THREE.Mesh(noseGeo, mats.paint);
+    nose.position.set(0, YC, Z_FRONT);
+    cabinGroup.add(nose);
+    // parabrisas: cuatro paneles sobre la banda superior del morro
+    const wsPts = [];
+    for (let i = 0; i <= 6; i++) {
+      const tt = 0.5 + (i / 6) * 0.15;
+      wsPts.push(new THREE.Vector2(noseR(tt) + 0.012, tt * L_NOSE));
+    }
+    for (const [ph0, ph1] of [[-1.0, -0.56], [-0.5, -0.03], [0.03, 0.5], [0.56, 1.0]]) {
+      const g2 = mkGeo(new THREE.LatheGeometry(wsPts, 8, ph0, ph1 - ph0));
+      g2.rotateX(-Math.PI / 2);
+      bendY(g2, L_NOSE, -1, noseDroop);
+      const pane = new THREE.Mesh(g2, mats.cockpit);
+      pane.position.set(0, YC, Z_FRONT);
+      cabinGroup.add(pane);
+    }
+
+    // cono de cola: el eje sube a medida que se estrecha (la panza se recoge)
+    const L_TAIL = 6.8;
+    const tailR = (tt) => R_OUT * (1 - 0.84 * Math.pow(tt, 1.5));
+    const tailRise = (tt) => (R_OUT - tailR(tt)) * 0.82;
+    const tailPts = [];
+    for (let i = 0; i <= 24; i++) {
+      const tt = i / 24;
+      tailPts.push(new THREE.Vector2(tailR(tt), tt * L_TAIL));
+    }
+    const tailGeo = mkGeo(new THREE.LatheGeometry(tailPts, 56));
+    tailGeo.rotateX(Math.PI / 2); // +y → +z: hacia atrás
+    bendY(tailGeo, L_TAIL, 1, tailRise);
+    const tail = new THREE.Mesh(tailGeo, mats.paint);
+    tail.position.set(0, YC, zEnd);
+    cabinGroup.add(tail);
+    const apuGeo = mkGeo(new THREE.CircleGeometry(tailR(1), 24));
+    const apu = new THREE.Mesh(apuGeo, mats.fan);
+    apu.position.set(0, YC + tailRise(1), zEnd + L_TAIL);
+    cabinGroup.add(apu);
+
+    // deriva: trapecio en flecha con cantos redondeados, en el color de la librea
+    const finShape = new THREE.Shape();
+    finShape.moveTo(1.2, 0);
+    finShape.lineTo(4.6, 4.5);
+    finShape.lineTo(6.1, 4.5);
+    finShape.lineTo(6.0, 0);
+    finShape.closePath();
+    const finGeo = mkGeo(new THREE.ExtrudeGeometry(finShape, {
+      depth: 0.24, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2,
+    }));
+    finGeo.rotateY(-Math.PI / 2); // x de la forma → z del avión
+    finGeo.translate(0.12, 0, 0);
+    const fin = new THREE.Mesh(finGeo, mats.tailPaint);
+    fin.position.set(0, YC + 1.95, zEnd);
+    cabinGroup.add(fin);
+
+    // estabilizadores horizontales
+    const stabShape = new THREE.Shape();
+    stabShape.moveTo(0, 3.0);
+    stabShape.lineTo(4.6, 4.9);
+    stabShape.lineTo(4.6, 5.7);
+    stabShape.lineTo(0, 5.3);
+    stabShape.closePath();
+    const stabGeo = mkGeo(new THREE.ExtrudeGeometry(stabShape, {
+      depth: 0.12, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 2,
+    }));
+    stabGeo.rotateX(Math.PI / 2); // y de la forma → z; grosor hacia abajo
+    stabGeo.translate(0, 0.06, 0);
+
+    // ala: trapecio en flecha que se afina hacia la punta, con winglet
     const wingShape = new THREE.Shape();
     wingShape.moveTo(0, -1.8); // raíz, borde de ataque
     wingShape.lineTo(10.5, 1.4); // punta, borde de ataque (flecha ~31°)
     wingShape.lineTo(10.5, 2.5); // punta, borde de fuga
     wingShape.lineTo(0, 2.0); // raíz, borde de fuga
     wingShape.closePath();
-    const wingGeo = mkGeo(
-      new THREE.ExtrudeGeometry(wingShape, { depth: 0.14, bevelEnabled: false })
-    );
+    const wingGeo = mkGeo(new THREE.ExtrudeGeometry(wingShape, {
+      depth: 0.24, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2,
+    }));
     wingGeo.rotateX(Math.PI / 2);
-    for (const sx of [-1, 1]) {
-      const wing = new THREE.Mesh(wingGeo, mats.wing);
-      wing.scale.x = sx;
-      // la raíz arranca justo en la pared del fuselaje: nada asoma dentro
-      wing.position.set(sx * 2.35, 0.75, wingC);
-      wing.rotation.z = sx * 0.05; // diedro sutil hacia arriba
-      cabinGroup.add(wing);
-      // motor colgado bajo el ala, con pilón y entrada oscura
-      const engGeo = mkGeo(new THREE.CylinderGeometry(0.7, 0.62, 2.3, 20));
-      engGeo.rotateX(Math.PI / 2);
-      const eng = new THREE.Mesh(engGeo, mats.engine);
-      eng.position.set(sx * 4.6, 0.38, wingC - 1.1);
-      cabinGroup.add(eng);
-      const intGeo = mkGeo(new THREE.CircleGeometry(0.62, 24));
-      const intake = new THREE.Mesh(intGeo, mats.intake);
-      intake.rotation.y = Math.PI;
-      intake.position.set(sx * 4.6, 0.38, wingC - 2.26);
-      cabinGroup.add(intake);
-      const pylon = new THREE.Mesh(unitBox, mats.engine);
-      pylon.scale.set(0.16, 0.5, 1.3);
-      pylon.position.set(sx * 4.6, 0.85, wingC - 0.5);
-      cabinGroup.add(pylon);
+    wingGeo.translate(0, 0.12, 0);
+    {
+      const pos = wingGeo.getAttribute('position');
+      for (let i = 0; i < pos.count; i++) {
+        const k = 1 - 0.62 * THREE.MathUtils.clamp(pos.getX(i) / 10.5, 0, 1);
+        pos.setY(i, pos.getY(i) * k);
+      }
+      wingGeo.computeVertexNormals();
     }
+    const wlShape = new THREE.Shape();
+    wlShape.moveTo(0, 0);
+    wlShape.lineTo(1.1, 0);
+    wlShape.lineTo(1.05, 1.15);
+    wlShape.lineTo(0.72, 1.15);
+    wlShape.closePath();
+    const wlGeo = mkGeo(new THREE.ExtrudeGeometry(wlShape, {
+      depth: 0.06, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 1,
+    }));
+    wlGeo.rotateY(-Math.PI / 2);
+    wlGeo.translate(0.03, 0, 0);
 
-    // ---- morro y cola planos, estilo plano de asientos (SVG tumbado) ----------
-    const noseShape = new THREE.Shape();
-    noseShape.moveTo(-1.98, 0);
-    noseShape.quadraticCurveTo(-1.85, 2.6, 0, 4.4);
-    noseShape.quadraticCurveTo(1.85, 2.6, 1.98, 0);
-    noseShape.closePath();
-    const noseGeo = mkGeo(new THREE.ShapeGeometry(noseShape, 24));
-    noseGeo.rotateX(-Math.PI / 2);
-    const nose = new THREE.Mesh(noseGeo, mats.plan);
-    nose.position.set(0, 0.02, Z_FRONT);
-    cabinGroup.add(nose);
-    // parabrisas del cockpit: cuatro paneles oscuros en abanico
-    const wsSpin = [0.95, 0.35, -0.35, -0.95];
-    for (let i = 0; i < 4; i++) {
-      const pane = new THREE.Mesh(unitPlane, mats.planDark);
-      pane.scale.set(0.52, 0.26, 1);
-      const wx = [-1.05, -0.38, 0.38, 1.05][i];
-      pane.rotation.set(-Math.PI / 2, 0, wsSpin[i]);
-      pane.position.set(wx, 0.03, Z_FRONT - 2.6 - (Math.abs(wx) < 0.5 ? 0.5 : 0.1));
-      cabinGroup.add(pane);
-    }
-    // cola: cono + estabilizadores horizontales + proyección de la deriva
-    const tailShape = new THREE.Shape();
-    tailShape.moveTo(-1.98, 0);
-    tailShape.quadraticCurveTo(-1.7, -3.4, -0.45, -5.6);
-    tailShape.quadraticCurveTo(0, -6.0, 0.45, -5.6);
-    tailShape.quadraticCurveTo(1.7, -3.4, 1.98, 0);
-    tailShape.closePath();
-    const tailGeo = mkGeo(new THREE.ShapeGeometry(tailShape, 24));
-    tailGeo.rotateX(-Math.PI / 2);
-    const tail = new THREE.Mesh(tailGeo, mats.plan);
-    tail.position.set(0, 0.02, zEnd);
-    cabinGroup.add(tail);
-    const stabShape = new THREE.Shape();
-    stabShape.moveTo(0.4, -3.4);
-    stabShape.lineTo(4.7, -5.2);
-    stabShape.lineTo(4.7, -5.9);
-    stabShape.lineTo(0.4, -5.0);
-    stabShape.closePath();
-    const stabGeo = mkGeo(new THREE.ShapeGeometry(stabShape));
-    stabGeo.rotateX(-Math.PI / 2);
+    // motor: góndola torneada con fan, cono de admisión y tobera
+    const nacPts = [
+      [0.6, 0], [0.7, 0.08], [0.75, 0.35], [0.74, 1.5], [0.65, 2.2], [0.5, 2.55],
+    ].map(([r, y]) => new THREE.Vector2(r, y));
+    const nacGeo = mkGeo(new THREE.LatheGeometry(nacPts, 36));
+    nacGeo.rotateX(Math.PI / 2);
+    const fanGeo = mkGeo(new THREE.CircleGeometry(0.62, 32));
+    fanGeo.rotateY(Math.PI);
+    const spinGeo = mkGeo(new THREE.ConeGeometry(0.17, 0.42, 20));
+    spinGeo.rotateX(-Math.PI / 2);
+    const nozGeo = mkGeo(new THREE.ConeGeometry(0.34, 0.75, 24));
+    nozGeo.rotateX(Math.PI / 2);
+
+    // cada lado es un grupo; el izquierdo es el derecho con escala -1 en X
+    // (three invierte la orientación de caras con determinante negativo)
     for (const sx of [-1, 1]) {
-      const stab = new THREE.Mesh(stabGeo, mats.plan);
-      stab.scale.x = sx;
-      stab.position.set(0, 0.025, zEnd);
-      cabinGroup.add(stab);
+      const side = new THREE.Group();
+      side.scale.x = sx;
+
+      const wing = new THREE.Mesh(wingGeo, mats.wing);
+      // raíz entre forro y casco: con el biselado (5 cm) a x=2,35 asomaba
+      // dentro de la cabina a la altura de la ventanilla
+      wing.position.set(2.45, 0.75, wingC);
+      wing.rotation.z = 0.05; // diedro
+      side.add(wing);
+      const winglet = new THREE.Mesh(wlGeo, mats.tailPaint);
+      winglet.position.set(10.45, 0.02, 1.4);
+      winglet.rotation.z = -0.22; // inclinado hacia fuera
+      wing.add(winglet);
+
+      const eng = new THREE.Group();
+      eng.position.set(4.7, -0.22, wingC - 2.55);
+      eng.add(new THREE.Mesh(nacGeo, mats.paint));
+      const fanM = new THREE.Mesh(fanGeo, mats.fan);
+      fanM.position.z = 0.28;
+      eng.add(fanM);
+      const spin = new THREE.Mesh(spinGeo, mats.engine);
+      spin.position.z = 0.12;
+      eng.add(spin);
+      const noz = new THREE.Mesh(nozGeo, mats.fan);
+      noz.position.z = 2.85;
+      eng.add(noz);
+      side.add(eng);
+      const pylon = new THREE.Mesh(unitBox, mats.paint);
+      pylon.scale.set(0.16, 0.34, 1.9);
+      pylon.position.set(4.7, 0.62, wingC - 1.35);
+      side.add(pylon);
+
+      const stab = new THREE.Mesh(stabGeo, mats.paint);
+      stab.position.set(0.3, YC + 0.95, zEnd);
+      side.add(stab);
+
+      cabinGroup.add(side);
     }
-    const fin = new THREE.Mesh(unitBox, mats.planDark);
-    fin.scale.set(0.22, 0.02, 2.6);
-    fin.position.set(0, 0.035, zEnd + 4.6);
-    cabinGroup.add(fin);
 
     t.homeView.theta = 0;
     t.homeView.phi = 0.14;
-    t.homeView.radius = Math.min(60, Math.max(16, (len + 10.5) * 1.0));
-    t.homeView.target.set(0, 0.6, Z_FRONT + (len + 1.5) / 2);
+    // del morro (L_NOSE por delante) a la cola (L_TAIL por detrás)
+    t.homeView.radius = Math.min(64, Math.max(20, (len + L_NOSE + L_TAIL) * 1.18));
+    t.homeView.target.set(0, 0.6, Z_FRONT + len / 2 + (L_TAIL - L_NOSE) / 2);
 
     // animación al cambiar de avión: la cabina se estira hasta su nueva
     // longitud mientras la cámara vuela a encuadrarla
