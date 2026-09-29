@@ -83,10 +83,13 @@ export default function PlaneConfigurator({ onExit }) {
   const tipRef = useRef(null);
   const markerLabelRef = useRef(null);
   const minimapRef = useRef(null);
+  const miniBtnRef = useRef(null);
+  // en móvil el minimapa va plegado en un botón y se abre a demanda
+  const [miniOpen, setMiniOpen] = useState(false);
   // hueco del minimapa (para que los avisos inferiores no lo pisen)
   const miniBox = () => {
-    const cv = minimapRef.current;
-    if (!cv || !cv.offsetWidth) return { right: 0, above: 0 };
+    const cv = [minimapRef.current, miniBtnRef.current].find((el) => el && el.offsetWidth);
+    if (!cv) return { right: 0, above: 0 };
     return {
       right: cv.offsetLeft + cv.offsetWidth,
       above: cv.offsetParent ? cv.offsetParent.clientHeight - cv.offsetTop : 0,
@@ -1030,7 +1033,7 @@ export default function PlaneConfigurator({ onExit }) {
     const t = T.current;
     const cv = minimapRef.current;
     if (!t || !cv || !t.seatList.length) return;
-    const cssW = 252;
+    const cssW = narrowRef.current ? 224 : 252;
     const pad = 8;
     const zMin = Z_FRONT - 4.4; // morro
     const zMax = t.cabin.zEnd + 6.2; // cola
@@ -1107,6 +1110,11 @@ export default function PlaneConfigurator({ onExit }) {
     }
     t.miniMap = { scale, pad, cssH, zMin };
   }, []);
+
+  // el minimapa cambia de ancho entre móvil y escritorio
+  useEffect(() => {
+    drawMinimap();
+  }, [isNarrow, drawMinimap]);
 
   const onMinimapClick = useCallback((e) => {
     const t = T.current;
@@ -1845,6 +1853,20 @@ export default function PlaneConfigurator({ onExit }) {
         </button>
       )}
 
+      {/* minimapa 2D: en móvil se pliega en un botón para no tapar la escena */}
+      {isNarrow && !panelOpen && (
+        <button
+          ref={miniBtnRef}
+          className="t3d-fab"
+          style={{ bottom: 16, left: povUI ? 16 : 68 }}
+          title={miniOpen ? 'Ocultar plano' : 'Plano de asientos'}
+          aria-label={miniOpen ? 'Ocultar plano de asientos' : 'Mostrar plano de asientos'}
+          aria-expanded={miniOpen}
+          onClick={() => setMiniOpen((o) => !o)}
+        >
+          <Ic size={18}>{miniOpen ? icons.x : icons.map}</Ic>
+        </button>
+      )}
       <canvas
         ref={minimapRef}
         onClick={onMinimapClick}
@@ -1852,7 +1874,8 @@ export default function PlaneConfigurator({ onExit }) {
         aria-label="Plano de asientos: toca un asiento para marcarlo"
         style={{
           ...ui.minimap,
-          display: isNarrow && panelOpen ? 'none' : 'block',
+          ...(isNarrow ? { left: 16, bottom: 68 } : null),
+          display: isNarrow && (panelOpen || !miniOpen) ? 'none' : 'block',
         }}
       />
 
@@ -2072,8 +2095,8 @@ const ui = {
   },
   // franja inferior para el aviso: centrada, pero sin pisar el minimapa
   povHintWrap: ({ right, above }) => {
-    // si a la derecha del minimapa no caben ~300px, el aviso sube por encima
-    const stack = right && typeof window !== 'undefined' && window.innerWidth - right < 330;
+    // si a la derecha del minimapa no caben ~240px, el aviso sube por encima
+    const stack = right && typeof window !== 'undefined' && window.innerWidth - right < 240;
     return {
       position: 'absolute',
       bottom: stack ? above + 10 : 22,
