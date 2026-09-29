@@ -83,6 +83,15 @@ export default function PlaneConfigurator({ onExit }) {
   const tipRef = useRef(null);
   const markerLabelRef = useRef(null);
   const minimapRef = useRef(null);
+  // hueco del minimapa (para que los avisos inferiores no lo pisen)
+  const miniBox = () => {
+    const cv = minimapRef.current;
+    if (!cv || !cv.offsetWidth) return { right: 0, above: 0 };
+    return {
+      right: cv.offsetLeft + cv.offsetWidth,
+      above: cv.offsetParent ? cv.offsetParent.clientHeight - cv.offsetTop : 0,
+    };
+  };
   const T = useRef(null);
   const initialRef = useRef(null);
   if (initialRef.current === null) initialRef.current = readStorage(STORAGE_KEY) || {};
@@ -1797,9 +1806,11 @@ export default function PlaneConfigurator({ onExit }) {
       <div ref={markerLabelRef} style={ui.markerLabel} />
 
       {povUI && (
-        <div style={ui.povHint}>
-          Vista desde el asiento — arrastra para mirar (¡busca el ala!) · toca
-          otro asiento para saltar
+        <div style={ui.povHintWrap(miniBox())}>
+          <div style={ui.povHint}>
+            Vista desde el asiento — arrastra para mirar (¡busca el ala!) · toca
+            otro asiento para saltar
+          </div>
         </div>
       )}
 
@@ -2059,28 +2070,36 @@ const ui = {
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.35)',
   },
+  // franja inferior para el aviso: centrada, pero sin pisar el minimapa
+  povHintWrap: ({ right, above }) => {
+    // si a la derecha del minimapa no caben ~300px, el aviso sube por encima
+    const stack = right && typeof window !== 'undefined' && window.innerWidth - right < 330;
+    return {
+      position: 'absolute',
+      bottom: stack ? above + 10 : 22,
+      left: stack ? 16 : `max(${right + 14}px, calc(50% - 280px))`,
+      right: stack ? 16 : 'max(16px, calc(50% - 280px))',
+      display: 'flex',
+      justifyContent: 'center',
+      pointerEvents: 'none',
+    };
+  },
   povHint: {
     WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-    position: 'absolute',
-    top: 12,
-    left: '50%',
-    transform: 'translateX(-50%)',
     background: 'rgba(30,30,32,.62)',
     backdropFilter: 'blur(30px) saturate(180%)',
     border: '1px solid rgba(255,255,255,.2)',
-    borderRadius: 999,
+    borderRadius: 18,
     padding: '8px 18px',
     color: '#fff',
     fontSize: 12.5,
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
-    whiteSpace: 'nowrap',
-    maxWidth: 'calc(100vw - 24px)',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    textAlign: 'center',
+    lineHeight: 1.4,
   },
   backBtn: {
     position: 'absolute',
-    bottom: 22,
+    top: 14,
     left: '50%',
     transform: 'translateX(-50%)',
     padding: '11px 22px',
@@ -2094,6 +2113,7 @@ const ui = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     boxShadow: '0 8px 30px rgba(0,0,0,.35)',
     display: 'flex',
+    whiteSpace: 'nowrap',
     alignItems: 'center',
   },
   tip: {

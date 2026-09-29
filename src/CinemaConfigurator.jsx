@@ -90,6 +90,15 @@ export default function CinemaConfigurator({ onExit }) {
   const markerLabelRef = useRef(null);
   const fileRef = useRef(null);
   const minimapRef = useRef(null);
+  // hueco del minimapa (para que los avisos inferiores no lo pisen)
+  const miniBox = () => {
+    const cv = minimapRef.current;
+    if (!cv || !cv.offsetWidth) return { right: 0, above: 0 };
+    return {
+      right: cv.offsetLeft + cv.offsetWidth,
+      above: cv.offsetParent ? cv.offsetParent.clientHeight - cv.offsetTop : 0,
+    };
+  };
   const T = useRef(null); // todo el estado three.js
   const initialRef = useRef(null);
   if (initialRef.current === null) initialRef.current = loadInitial();
@@ -1961,18 +1970,14 @@ export default function CinemaConfigurator({ onExit }) {
       {/* etiqueta de la baliza de butacas seleccionadas */}
       <div ref={markerLabelRef} style={ui.markerLabel} />
 
-      {/* aviso superior en modo POV */}
-      {povUI && (
-        <div style={ui.povHint}>
-          Vista desde la butaca — arrastra para mirar · toca otra butaca para
-          saltar a ella
-        </div>
-      )}
-
-      {/* aviso durante el recorrido */}
-      {tourUI && (
-        <div style={ui.povHint}>
-          Recorrido por la sala — toca en cualquier sitio para salir
+      {/* aviso inferior en modo POV */}
+      {(povUI || tourUI) && (
+        <div style={ui.povHintWrap(miniBox())}>
+          <div style={ui.povHint}>
+            {povUI
+              ? 'Vista desde la butaca — arrastra para mirar · toca otra butaca para saltar a ella'
+              : 'Recorrido por la sala — toca en cualquier sitio para salir'}
+          </div>
         </div>
       )}
 
@@ -2230,28 +2235,36 @@ const ui = {
     cursor: 'pointer',
     boxShadow: '0 10px 40px rgba(0,0,0,.5)',
   },
+  // franja inferior para el aviso: centrada, pero sin pisar el minimapa
+  povHintWrap: ({ right, above }) => {
+    // si a la derecha del minimapa no caben ~300px, el aviso sube por encima
+    const stack = right && typeof window !== 'undefined' && window.innerWidth - right < 330;
+    return {
+      position: 'absolute',
+      bottom: stack ? above + 10 : 22,
+      left: stack ? 16 : `max(${right + 14}px, calc(50% - 280px))`,
+      right: stack ? 16 : 'max(16px, calc(50% - 280px))',
+      display: 'flex',
+      justifyContent: 'center',
+      pointerEvents: 'none',
+    };
+  },
   povHint: {
     WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-    position: 'absolute',
-    top: 12,
-    left: '50%',
-    transform: 'translateX(-50%)',
     background: 'rgba(30,30,32,.62)',
     backdropFilter: 'blur(30px) saturate(180%)',
     border: '1px solid rgba(255,255,255,.16)',
-    borderRadius: 999,
+    borderRadius: 18,
     padding: '8px 18px',
     color: '#e8e6ec',
     fontSize: 12.5,
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
-    whiteSpace: 'nowrap',
-    maxWidth: 'calc(100vw - 24px)',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    textAlign: 'center',
+    lineHeight: 1.4,
   },
   backBtn: {
     position: 'absolute',
-    bottom: 22,
+    top: 14,
     left: '50%',
     transform: 'translateX(-50%)',
     padding: '11px 22px',
@@ -2265,6 +2278,7 @@ const ui = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif",
     boxShadow: '0 8px 30px rgba(0,0,0,.5)',
     display: 'flex',
+    whiteSpace: 'nowrap',
     alignItems: 'center',
   },
   tip: {
