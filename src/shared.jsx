@@ -314,32 +314,40 @@ export function Panel({ open, sheet, accent, label, onClose, top, children }) {
   );
 }
 
+// cabecera editorial: código de barras, antetítulo con acciones, título grande.
 // acciones: [{ icon, label, onClick, disabled, shortcut }]
-export const PanelHeader = ({ title, subtitle, onClose, actions = [] }) => (
+export const PanelHeader = ({ eyebrow, title, subtitle, onClose, actions = [] }) => (
   <div className="t3d-head">
-    <div className="t3d-head-text">
-      <div className="t3d-title">{title}</div>
-      {subtitle && <div className="t3d-subtitle">{subtitle}</div>}
-    </div>
-    {actions.map((a) => (
-      <button
-        key={a.label}
-        className="t3d-icon-btn"
-        aria-label={a.label}
-        title={a.shortcut ? `${a.label} (${a.shortcut})` : a.label}
-        disabled={a.disabled}
-        onClick={a.onClick}
-      >
-        <Ic size={14}>{a.icon}</Ic>
+    <span className="t3d-barcode" aria-hidden="true" />
+    <div className="t3d-head-bar">
+      <span className="t3d-eyebrow">{eyebrow}</span>
+      {actions.map((a) => (
+        <button
+          key={a.label}
+          className="t3d-icon-btn"
+          aria-label={a.label}
+          title={a.shortcut ? `${a.label} (${a.shortcut})` : a.label}
+          disabled={a.disabled}
+          onClick={a.onClick}
+        >
+          <Ic size={13}>{a.icon}</Ic>
+        </button>
+      ))}
+      <button className="t3d-icon-btn" aria-label="Cerrar panel" title="Cerrar (Esc)" onClick={onClose}>
+        <Ic size={13}>{icons.x}</Ic>
       </button>
-    ))}
-    <button className="t3d-icon-btn" aria-label="Cerrar panel" title="Cerrar (Esc)" onClick={onClose}>
-      <Ic size={14}>{icons.x}</Ic>
-    </button>
+    </div>
+    <h2 className="t3d-title">
+      {title}
+      <svg viewBox="0 0 10 10" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="0.7">
+        <path d="M1 9 9 1M3.2 1H9v5.8" />
+      </svg>
+    </h2>
+    {subtitle && <p className="t3d-subtitle">{subtitle}</p>}
   </div>
 );
 
-// pestañas del panel (control segmentado a todo lo ancho)
+// pestañas del panel (pastillas a todo lo ancho)
 export const Tabs = ({ tabs, value, onChange }) => (
   <div className="t3d-tabs" role="tablist">
     {tabs.map((t) => (
@@ -426,16 +434,17 @@ export function useKeys(handler) {
 // propuesta de compra: asientos, total y acciones
 export const ProposalCard = ({ title, detail, total, onConfirm, onCancel }) => (
   <div className="t3d-proposal">
-    <div className="t3d-proposal-head">
-      <div>
-        <div className="t3d-proposal-title">{title}</div>
-        {detail && <div className="t3d-subtitle">{detail}</div>}
-      </div>
-      <div className="t3d-proposal-total">{fmtEUR(total)}</div>
+    <div className="t3d-proposal-title">{title}</div>
+    {detail && <div className="t3d-proposal-detail">{detail}</div>}
+    <div className="t3d-price">
+      <span className="t3d-price-label">Total</span>
+      <span className="t3d-price-value">{fmtEUR(total)}</span>
     </div>
     <div className="t3d-proposal-actions">
-      <button className="t3d-btn" onClick={onCancel}>Cancelar</button>
       <button className="t3d-btn is-primary" onClick={onConfirm}>Confirmar venta</button>
+      <button className="t3d-btn is-round" aria-label="Cancelar propuesta" title="Cancelar" onClick={onCancel}>
+        <Ic size={15}>{icons.x}</Ic>
+      </button>
     </div>
   </div>
 );
@@ -479,11 +488,11 @@ export const Stats = ({ items }) => (
   <div className="t3d-stats">
     {items.map((it) => (
       <div className="t3d-stat" key={it.label}>
-        <div className="t3d-stat-value">{it.value}</div>
         <div className="t3d-stat-label">
           <span className="t3d-dot" style={{ background: it.color }} />
           {it.label}
         </div>
+        <div className="t3d-stat-value">{it.value}</div>
       </div>
     ))}
   </div>
@@ -578,3 +587,24 @@ export const Tile = ({ icon, label, active, onClick }) => (
     {label}
   </button>
 );
+
+// figura técnica acotada: cabecera (FIG. · escala), dibujo y cota inferior.
+// El dibujo usa unidades del viewBox (w × h); la cota va de x0 a x1.
+export const Figure = ({ fig, scale, w = 260, h, x0, x1, dim, children }) => {
+  const y = h + 10;
+  return (
+    <figure className="t3d-fig">
+      <figcaption className="t3d-fig-head">
+        <span>{fig}</span>
+        {scale && <span>{scale}</span>}
+      </figcaption>
+      <svg viewBox={`0 0 ${w} ${h + 28}`} role="img" aria-label={`${fig}: ${dim}`}>
+        {children}
+        <path className="t3d-fig-dim" d={`M${x0} ${y}H${x1}M${x0} ${y - 4}v8M${x1} ${y - 4}v8`} />
+        <text className="t3d-fig-text" x={(x0 + x1) / 2} y={y + 15} textAnchor="middle">
+          {dim}
+        </text>
+      </svg>
+    </figure>
+  );
+};

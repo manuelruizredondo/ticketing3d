@@ -7,7 +7,7 @@ import { BufferGeometryUtils } from 'three/examples/jsm/utils/BufferGeometryUtil
 import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
   Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
-  SliderRow, Switch, Stepper, NumberRow, Tile, Tabs, ToolBar, ProposalCard,
+  SliderRow, Switch, Stepper, NumberRow, Tile, Tabs, ToolBar, ProposalCard, Figure,
   useToast, useKeys, useUiPref,
 } from './shared.jsx';
 
@@ -125,6 +125,7 @@ export default function CinemaConfigurator({ onExit }) {
   const [panelOpen, setPanelOpen] = useState(true);
   const [povUI, setPovUI] = useState(false);
   const [heatOn, setHeatOn] = useState(false);
+  const [plan, setPlan] = useState(null); // planta de la sala para la figura técnica
   const [muted, setMuted] = useState(true);
   const [counts, setCounts] = useState({
     total: 0, vip: 0, blocked: 0, sold: 0, soldVip: 0,
@@ -1633,6 +1634,21 @@ export default function CinemaConfigurator({ onExit }) {
     const zMid = (zFront + zBack) / 2;
     t.hallBounds = { halfW: hallW / 2, zBack };
 
+    // planta acotada para la figura técnica del panel
+    const planRows = new Map();
+    for (const s of t.seatList) {
+      if (!planRows.has(s.row)) planRows.set(s.row, { vip: s.autoVip, pts: [] });
+      planRows.get(s.row).pts.push([s.px, s.pz]);
+    }
+    setPlan({
+      w: hallW,
+      z0: zFront,
+      z1: zBack,
+      screenW: Math.max(4, (hallW - 0.8) * (screenWPct / 100)),
+      gap: spacing * 1.6,
+      rows: [...planRows.values()].map((r) => ({ vip: r.vip, pts: r.pts.sort((a, b) => a[0] - b[0]) })),
+    });
+
     mats.floor.map.repeat.set(hallW / 3.2, hallD / 3.2);
     mats.wall.map.repeat.set(hallD / 4.5, HALL_H / 4.5);
 
@@ -2089,6 +2105,7 @@ export default function CinemaConfigurator({ onExit }) {
         top={
           <>
             <PanelHeader
+              eyebrow="Ticketing3D / Cine / Nº 01"
               title="Sala de cine"
               subtitle="Cinemes Full HD · Centre Splau"
               onClose={() => setPanelOpen(false)}
@@ -2174,6 +2191,7 @@ export default function CinemaConfigurator({ onExit }) {
 
         {uiPref.tab === 'sala' && (
           <div className="t3d-tabpanel" key="sala">
+            {plan && <HallFigure plan={plan} />}
             <Section label="Butacas">
               <SliderRow label="Filas" value={params.rows} min={3} max={24} step={1} onChange={setP('rows')} />
               <SliderRow label="Butacas por fila" value={params.cols} min={6} max={32} step={1} onChange={setP('cols')} />
@@ -2238,6 +2256,56 @@ export default function CinemaConfigurator({ onExit }) {
         )}
       </Panel>
     </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// figura técnica: planta de la sala con pantalla, filas reales y cota de ancho
+// ----------------------------------------------------------------------------
+function HallFigure({ plan }) {
+  // girada 90°: la pantalla a la izquierda, el fondo de la sala a la derecha
+  const W = 260;
+  const d = plan.z1 - plan.z0;
+  const k = Math.min(230 / d, 112 / plan.w);
+  const ox = (W - d * k) / 2;
+  const X = (z) => ox + (z - plan.z0) * k;
+  const Y = (x) => 2 + (x + plan.w / 2) * k;
+  const h = plan.w * k + 4;
+  // pantalla curva (misma ley que en 3D: radio grande, cóncava hacia el público)
+  const sw = plan.screenW / 2;
+  const sr = Math.max(16, sw * 2.2);
+  const sag = (sr - Math.sqrt(sr * sr - sw * sw)) * k;
+  const xS = X(SCREEN_Z);
+  // cada fila se parte en tramos donde está el pasillo
+  const rowPaths = plan.rows.map((r) => {
+    let dd = '';
+    r.pts.forEach(([x, z], i) => {
+      const brk = i === 0 || x - r.pts[i - 1][0] > plan.gap;
+      dd += `${brk ? 'M' : 'L'}${X(z).toFixed(1)} ${Y(x).toFixed(1)}`;
+    });
+    return { d: dd, vip: r.vip };
+  });
+  const m = (v) => `${v.toFixed(1).replace('.', ',')} M`;
+  return (
+    <Figure
+      fig="Fig. 01 — Planta"
+      scale={`Ancho ${m(plan.w)}`}
+      h={h}
+      x0={X(plan.z0)}
+      x1={X(plan.z1)}
+      dim={m(d)}
+    >
+      <rect className="t3d-fig-ink" x={X(plan.z0)} y={Y(-plan.w / 2)} width={d * k} height={plan.w * k} />
+      <path className="t3d-fig-axis" d={`M${X(plan.z0) - 4} ${Y(0)}H${X(plan.z1) + 4}`} />
+      <path
+        className="t3d-fig-dim"
+        style={{ strokeWidth: 2 }}
+        d={`M${xS + sag} ${Y(-sw)}Q${xS - sag} ${Y(0)} ${xS + sag} ${Y(sw)}`}
+      />
+      {rowPaths.map((r, i) => (
+        <path key={i} className={r.vip ? 't3d-fig-dim' : 't3d-fig-thin'} d={r.d} />
+      ))}
+    </Figure>
   );
 }
 

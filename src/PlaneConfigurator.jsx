@@ -6,7 +6,7 @@ import {
   easeInOutCubic, hash01, readStorage, writeStorage, useNarrow, disposeThree,
   Ic, icons, fmtEUR, Panel, PanelHeader, Section, Row, RowButton, Stats,
   SliderRow, Segmented, Stepper, NumberRow, Tile, Tabs, ToolBar, ProposalCard,
-  useToast, useKeys, useUiPref,
+  useToast, useKeys, useUiPref, Figure,
 } from './shared.jsx';
 
 // ============================================================================
@@ -42,9 +42,9 @@ const seatKind = (x) =>
 
 // filas físicas y salidas overwing (en numeración mostrada, que salta el 13)
 const AIRCRAFT = {
-  a319: { label: 'A319', rows: 18, exits: [8], row1LeftOnly: true },
-  a320: { label: 'A320', rows: 24, exits: [10, 11], row1LeftOnly: true },
-  a321: { label: 'A321', rows: 30, exits: [12, 14], row1LeftOnly: false },
+  a319: { label: 'A319', rows: 18, exits: [8], row1LeftOnly: true, lengthM: 33.84 },
+  a320: { label: 'A320', rows: 24, exits: [10, 11], row1LeftOnly: true, lengthM: 37.57 },
+  a321: { label: 'A321', rows: 30, exits: [12, 14], row1LeftOnly: false, lengthM: 44.51 },
 };
 // numeración mostrada: como en los aviones reales, la fila 13 no existe
 const displayNum = (i) => (i + 1 >= 13 ? i + 2 : i + 1);
@@ -1918,6 +1918,7 @@ export default function PlaneConfigurator({ onExit }) {
         top={
           <>
             <PanelHeader
+              eyebrow="Ticketing3D / Avión / Nº 02"
               title={`Cabina ${model.label}`}
               subtitle="Flota low-cost · zonas Space"
               onClose={() => setPanelOpen(false)}
@@ -2025,6 +2026,7 @@ export default function PlaneConfigurator({ onExit }) {
                 onChange={(id2) => setParams((p) => ({ ...p, aircraft: id2 }))}
                 options={Object.entries(AIRCRAFT).map(([id2, m2]) => ({ value: id2, label: m2.label }))}
               />
+              <PlaneFigure model={model} />
             </Section>
             <Section label="Distribución">
               <SliderRow
@@ -2080,6 +2082,67 @@ export default function PlaneConfigurator({ onExit }) {
 // ----------------------------------------------------------------------------
 // estilos (drawer glassmorphism, acento azul #3b82f6)
 // ----------------------------------------------------------------------------
+// figura técnica: planta acotada del avión (largo real; envergadura 35,8 m)
+function PlaneFigure({ model }) {
+  const W = 260;
+  const H = 132;
+  const k = 3.5; // px por metro
+  const L = model.lengthM;
+  const x0 = (W - L * k) / 2;
+  const X = (m) => (x0 + m * k).toFixed(1);
+  const Y = (m) => (H / 2 + m * k).toFixed(1);
+  const r = 1.98;
+  // semiancho del fuselaje a lo largo (morro redondeado, cono de cola)
+  const half = (x) => (x < L - 7.5 ? r : r - ((x - (L - 7.5)) / 7.1) * (r - 0.45));
+  const fus =
+    `M${X(0)} ${Y(0)}C${X(0.3)} ${Y(-1.3)} ${X(2)} ${Y(-r)} ${X(4.6)} ${Y(-r)}` +
+    `L${X(L - 7.5)} ${Y(-r)}L${X(L - 0.4)} ${Y(-0.45)}L${X(L)} ${Y(0)}L${X(L - 0.4)} ${Y(0.45)}` +
+    `L${X(L - 7.5)} ${Y(r)}L${X(4.6)} ${Y(r)}C${X(2)} ${Y(r)} ${X(0.3)} ${Y(1.3)} ${X(0)} ${Y(0)}Z`;
+  const xr = 0.37 * L - 0.5; // borde de ataque en la raíz del ala
+  const xs = L - 6.8; // estabilizador
+  const sides = [-1, 1];
+  const ticks = [];
+  for (let i = 0; i < model.rows; i++) {
+    const x = 6.2 + ((L - 15.7) * i) / Math.max(1, model.rows - 1);
+    ticks.push(`M${X(x)} ${Y(-1.5)}V${Y(-0.4)}M${X(x)} ${Y(0.4)}V${Y(1.5)}`);
+  }
+  return (
+    <Figure
+      fig={`Fig. 02 — ${model.label} en planta`}
+      scale="Esc. 1:500"
+      h={H}
+      x0={Number(X(0))}
+      x1={Number(X(L))}
+      dim={`${L.toFixed(2).replace('.', ',')} M`}
+    >
+      <path className="t3d-fig-axis" d={`M${X(-1.5)} ${H / 2}H${X(L + 1.5)}`} />
+      {sides.map((s) => (
+        <g key={s}>
+          <path
+            className="t3d-fig-ink"
+            d={`M${X(xr)} ${Y(s * r)}L${X(xr + 7.4)} ${Y(s * 17.9)}L${X(xr + 9)} ${Y(s * 17.9)}L${X(xr + 6.2)} ${Y(s * r)}Z`}
+          />
+          <path className="t3d-fig-thin" d={`M${X(xr + 1.4)} ${Y(s * r)}L${X(xr + 8)} ${Y(s * 16.4)}`} />
+          <rect
+            className="t3d-fig-ink"
+            x={X(xr - 2.6)}
+            y={Y(s * 5.75 - 1.05)}
+            width={4.2 * k}
+            height={2.1 * k}
+            rx={0.9 * k}
+          />
+          <path
+            className="t3d-fig-ink"
+            d={`M${X(xs)} ${Y(s * half(xs))}L${X(xs + 3.5)} ${Y(s * 6.3)}L${X(xs + 4.8)} ${Y(s * 6.3)}L${X(L - 2)} ${Y(s * half(L - 2))}Z`}
+          />
+        </g>
+      ))}
+      <path className="t3d-fig-ink" d={fus} />
+      <path className="t3d-fig-thin" d={ticks.join('')} />
+    </Figure>
+  );
+}
+
 const ui = {
   minimap: {
     position: 'absolute',

@@ -1,17 +1,17 @@
 /* ==========================================================================
-   Panel lateral estilo Apple: material "frost" (desenfoque + saturación),
-   tipografía del sistema, listas agrupadas y controles iOS.
-   El acento de cada configurador llega por la variable --accent.
+   Panel lateral editorial: cristal esmerilado, tipografía geométrica fina,
+   etiquetas en versalitas espaciadas, líneas finas y botones en pastilla.
+   Monocromo; el color solo aparece en los puntos de estado.
    ========================================================================== */
 
 .t3d-panel {
-  --accent: #0a84ff;
-  --label: rgba(255, 255, 255, 0.92);
-  --secondary: rgba(235, 235, 245, 0.6);
-  --tertiary: rgba(235, 235, 245, 0.36);
-  --fill: rgba(255, 255, 255, 0.07);
-  --fill-strong: rgba(255, 255, 255, 0.12);
-  --separator: rgba(255, 255, 255, 0.09);
+  --font: 'Jost', 'Futura', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --label: rgba(255, 255, 255, 0.96);
+  --secondary: rgba(255, 255, 255, 0.7);
+  --tertiary: rgba(255, 255, 255, 0.5);
+  --line: rgba(255, 255, 255, 0.22);
+  --line-strong: rgba(255, 255, 255, 0.55);
+  --ink: #14171d;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   position: absolute;
@@ -19,20 +19,20 @@
   right: 10px;
   bottom: 10px;
   z-index: 20;
-  width: min(340px, calc(100vw - 20px));
+  width: min(352px, calc(100vw - 20px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* opacidad suficiente para que el texto se lea también sobre el cielo */
-  background: rgba(28, 28, 30, 0.64);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
-  border: 0.5px solid rgba(255, 255, 255, 0.14);
-  border-radius: 22px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35), inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
+  /* velo gris azulado: se lee igual sobre el cielo claro que sobre la sala oscura */
+  background: linear-gradient(180deg, rgba(70, 80, 96, 0.5), rgba(26, 30, 38, 0.62));
+  -webkit-backdrop-filter: blur(48px) saturate(150%);
+  backdrop-filter: blur(48px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
   color: var(--label);
-  font: 13px/1.35 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
-  letter-spacing: -0.01em;
+  font: 300 13px/1.45 var(--font);
+  letter-spacing: 0.01em;
   -webkit-font-smoothing: antialiased;
   transition: transform 0.5s var(--ease), opacity 0.35s ease;
 }
@@ -41,23 +41,23 @@
   opacity: 0;
   pointer-events: none;
 }
-/* móvil: hoja inferior con asa, como las sheets de iOS */
+/* móvil: hoja inferior con asa */
 .t3d-panel.is-sheet {
   top: auto;
   left: 8px;
   right: 8px;
   bottom: 8px;
   width: auto;
-  height: 60%;
+  height: 62%;
 }
 .t3d-panel.is-sheet.is-closed {
   transform: translateY(calc(100% + 24px));
 }
 .t3d-grabber {
-  width: 36px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.3);
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.45);
   margin: 8px auto 0;
   flex-shrink: 0;
 }
@@ -72,126 +72,266 @@
 .t3d-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0 14px 18px;
+  padding: 0 20px 24px;
   scrollbar-width: none;
 }
 .t3d-scroll::-webkit-scrollbar {
   display: none;
 }
 
+/* versalitas espaciadas: el recurso tipográfico de todo el panel */
+.t3d-caps,
+.t3d-eyebrow,
+.t3d-section-label,
+.t3d-row-label,
+.t3d-slider-top > span:first-child,
+.t3d-stat-label,
+.t3d-fig-head,
+.t3d-price-label {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+
 /* ---- cabecera ------------------------------------------------------------ */
 .t3d-head {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  column-gap: 16px;
+  padding: 18px 16px 4px 16px;
+}
+/* hoja móvil: cabecera más compacta para dejar sitio al contenido */
+.t3d-panel.is-sheet .t3d-head {
+  padding-top: 8px;
+}
+.t3d-panel.is-sheet .t3d-title {
+  font-size: 24px;
+}
+.t3d-panel.is-sheet .t3d-barcode {
+  height: 38px;
+}
+.t3d-panel.is-sheet .t3d-subtitle {
+  margin-top: 6px;
+}
+.t3d-panel.is-sheet .t3d-summary,
+.t3d-panel.is-sheet .t3d-tabs {
+  margin-top: 12px;
+}
+/* código de barras vertical junto al título */
+.t3d-barcode {
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 2px;
+  width: 12px;
+  height: 46px;
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.9) 0 1px,
+    transparent 1px 3px,
+    rgba(255, 255, 255, 0.9) 3px 5px,
+    transparent 5px 6px,
+    rgba(255, 255, 255, 0.9) 6px 6.6px,
+    transparent 6.6px 8px
+  );
+}
+.t3d-head-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 16px 6px 20px;
-  flex-shrink: 0;
+  gap: 6px;
+  min-height: 30px;
 }
-.t3d-title {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-.t3d-subtitle {
-  font-size: 12px;
-  color: var(--secondary);
-  margin-top: 1px;
-}
-.t3d-head-text {
+.t3d-eyebrow {
   flex: 1;
   min-width: 0;
+  color: var(--secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.t3d-title {
+  margin: 4px 0 0;
+  font-size: 30px;
+  font-weight: 200;
+  line-height: 1.02;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+.t3d-title svg {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-left: 0.12em;
+  vertical-align: 0.32em;
+}
+.t3d-subtitle {
+  grid-column: 2;
+  margin: 10px 0 0;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  line-height: 1.6;
+  text-transform: uppercase;
+  color: var(--label);
 }
 .t3d-icon-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
-  background: var(--fill-strong);
-  color: var(--secondary);
+  background: transparent;
+  color: var(--label);
   cursor: pointer;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
 }
 .t3d-icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.18);
-  color: var(--label);
+  background: #fff;
+  color: var(--ink);
 }
 .t3d-icon-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.3;
   cursor: default;
 }
 
-/* ---- secciones y listas agrupadas ------------------------------------------ */
+/* ---- ficha técnica (resumen) ---------------------------------------------- */
+.t3d-summary {
+  margin: 16px 20px 0;
+}
+.t3d-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 20px;
+  border-top: 1px solid var(--line);
+}
+.t3d-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.t3d-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+}
+.t3d-stat-value {
+  font-size: 14px;
+  font-weight: 300;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- pestañas en pastilla ------------------------------------------------------ */
+.t3d-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 16px 20px 6px;
+}
+.t3d-tabs button {
+  flex: 1;
+  padding: 8px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--label);
+  font: 400 10.5px/1 var(--font);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.25s var(--ease), color 0.2s, border-color 0.2s;
+}
+.t3d-tabs button:hover {
+  border-color: #fff;
+}
+.t3d-tabs button[aria-selected='true'] {
+  background: #fff;
+  border-color: #fff;
+  color: var(--ink);
+}
+.t3d-tabpanel {
+  animation: t3d-fade 0.3s ease;
+}
+@keyframes t3d-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- secciones y filas con líneas finas ------------------------------------------ */
 .t3d-section {
-  margin-top: 18px;
+  margin-top: 24px;
 }
 .t3d-section-label {
-  padding: 0 6px 7px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--tertiary);
+  padding-bottom: 9px;
+  color: var(--secondary);
 }
 .t3d-group {
-  background: var(--fill);
-  border-radius: 14px;
-  overflow: hidden;
+  border-top: 1px solid var(--line);
 }
 .t3d-footnote {
-  padding: 7px 6px 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--tertiary);
+  padding-top: 11px;
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.6;
+  letter-spacing: 0.005em;
+  color: rgba(255, 255, 255, 0.82);
 }
 .t3d-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
-  padding: 9px 12px;
-}
-.t3d-row + .t3d-row::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 12px;
-  right: 0;
-  height: 0.5px;
-  background: var(--separator);
-}
-.t3d-row:focus-within {
-  background: rgba(255, 255, 255, 0.035);
+  min-height: 40px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
 }
 .t3d-row-label {
   flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
+  color: var(--secondary);
 }
 .t3d-row-detail {
-  color: var(--secondary);
+  font-size: 13.5px;
+  font-weight: 300;
+  letter-spacing: 0.03em;
   font-variant-numeric: tabular-nums;
+  color: var(--label);
 }
 .t3d-row-strong {
-  color: var(--label);
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 400;
 }
 .t3d-row-button {
   width: 100%;
-  border: 0;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
   background: none;
-  font: inherit;
+  font: 500 10.5px/1.3 var(--font);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   text-align: left;
-  color: var(--accent);
-  font-weight: 500;
+  color: var(--label);
   cursor: pointer;
+  transition: opacity 0.2s;
+}
+.t3d-row-button::after {
+  content: '↗';
+  margin-left: auto;
+  font-size: 15px;
+  letter-spacing: 0;
 }
 .t3d-row-button:hover {
-  background: rgba(255, 255, 255, 0.035);
+  opacity: 0.7;
 }
 .t3d-dot {
   display: inline-block;
@@ -200,251 +340,297 @@
   border-radius: 50%;
   flex-shrink: 0;
   /* aro fino: los estados oscuros también se distinguen sobre el cristal */
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
 }
 .t3d-toolbar .t3d-dot {
   width: 10px;
   height: 10px;
 }
 
-/* ---- estadísticas ------------------------------------------------------------ */
-.t3d-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+/* ---- figura técnica acotada ------------------------------------------------------- */
+.t3d-fig {
+  margin: 22px 0 0;
 }
-.t3d-stat {
-  position: relative;
-  padding: 11px 4px 10px;
-  text-align: center;
-}
-.t3d-stat + .t3d-stat::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 11px;
-  bottom: 11px;
-  width: 0.5px;
-  background: var(--separator);
-}
-.t3d-stat-value {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.t3d-stat-label {
+.t3d-fig-head {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin-top: 1px;
-  font-size: 11px;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
   color: var(--secondary);
 }
+.t3d-fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 10px;
+  overflow: visible;
+}
+.t3d-fig-ink {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.t3d-fig-thin {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.5);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+.t3d-fig-axis {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 0.6;
+  stroke-dasharray: 8 2 1.5 2;
+  vector-effect: non-scaling-stroke;
+}
+.t3d-fig-dim {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.75);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+.t3d-fig-text {
+  fill: rgba(255, 255, 255, 0.9);
+  font: 400 8.5px var(--font);
+  letter-spacing: 0.16em;
+}
 
-/* ---- slider fino con relleno -------------------------------------------------- */
+/* ---- slider fino ------------------------------------------------------------------ */
 .t3d-slider {
   flex-direction: column;
   align-items: stretch;
-  gap: 9px;
+  gap: 12px;
   padding-top: 11px;
-  padding-bottom: 13px;
+  padding-bottom: 14px;
 }
 .t3d-slider-top {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+}
+.t3d-slider-top > span:first-child {
+  color: var(--secondary);
 }
 .t3d-range {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 4px;
+  height: 2px;
   margin: 0;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--accent) var(--p), rgba(255, 255, 255, 0.16) var(--p));
+  border-radius: 1px;
+  background: linear-gradient(to right, #fff var(--p), rgba(255, 255, 255, 0.24) var(--p));
   cursor: pointer;
 }
 .t3d-range::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
-  transition: transform 0.15s var(--ease);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.14);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s;
 }
 .t3d-range:active::-webkit-slider-thumb {
-  transform: scale(1.12);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.18);
 }
 .t3d-range::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   border: 0;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
-/* ---- control segmentado -------------------------------------------------------- */
+/* ---- opciones en pastilla (como la talla de un producto) --------------------------- */
 .t3d-seg {
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 9px;
-  background: rgba(118, 118, 128, 0.24);
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .t3d-seg button {
-  flex: 1;
-  padding: 7px 4px;
-  border: 0;
-  border-radius: 7px;
+  padding: 8px 17px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
   background: transparent;
   color: var(--label);
-  font: inherit;
-  font-weight: 500;
+  font: 400 12.5px/1.2 var(--font);
+  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: background 0.25s var(--ease), box-shadow 0.25s;
+  transition: background 0.25s var(--ease), color 0.2s, border-color 0.2s;
+}
+.t3d-seg button:hover {
+  border-color: #fff;
 }
 .t3d-seg button[aria-pressed='true'] {
-  background: rgba(255, 255, 255, 0.22);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14), inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+  background: #fff;
+  border-color: #fff;
+  color: var(--ink);
+}
+.t3d-row > div > .t3d-seg {
+  padding: 2px 0;
 }
 
-/* ---- interruptor iOS ------------------------------------------------------------ */
+/* ---- interruptor de contorno ------------------------------------------------------- */
 .t3d-switch {
   position: relative;
   flex-shrink: 0;
-  width: 42px;
-  height: 26px;
+  width: 40px;
+  height: 22px;
   padding: 0;
-  border: 0;
-  border-radius: 13px;
-  background: rgba(120, 120, 128, 0.36);
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: transparent;
   cursor: pointer;
-  transition: background 0.25s;
+  transition: background 0.25s, border-color 0.25s;
 }
 .t3d-switch::after {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 22px;
-  height: 22px;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-  transition: transform 0.25s var(--ease);
+  transition: transform 0.25s var(--ease), background 0.25s;
 }
 .t3d-switch[aria-checked='true'] {
-  background: #30d158;
+  background: #fff;
+  border-color: #fff;
 }
 .t3d-switch[aria-checked='true']::after {
-  transform: translateX(16px);
+  transform: translateX(18px);
+  background: var(--ink);
 }
 
-/* ---- stepper y campos numéricos -------------------------------------------------- */
+/* ---- stepper y campos numéricos ------------------------------------------------------ */
 .t3d-stepper {
   display: flex;
   align-items: center;
-  border-radius: 8px;
-  background: rgba(118, 118, 128, 0.24);
+  gap: 4px;
 }
 .t3d-stepper button {
-  width: 32px;
+  width: 28px;
   height: 28px;
-  border: 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
   background: none;
   color: var(--label);
-  font-size: 17px;
-  line-height: 1;
+  font: 300 16px/1 var(--font);
   cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.t3d-stepper button:hover:not(:disabled) {
+  background: #fff;
+  color: var(--ink);
 }
 .t3d-stepper button:disabled {
-  color: var(--tertiary);
+  opacity: 0.3;
   cursor: default;
 }
 .t3d-stepper span {
-  min-width: 22px;
+  min-width: 26px;
   text-align: center;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 300;
   font-variant-numeric: tabular-nums;
 }
 .t3d-num {
   width: 64px;
   padding: 2px 0;
   border: 0;
+  border-bottom: 1px solid transparent;
   background: transparent;
-  color: var(--secondary);
-  font: inherit;
+  color: var(--label);
+  font: 300 13.5px var(--font);
   text-align: right;
   font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
+  transition: border-color 0.2s;
 }
 .t3d-num::-webkit-outer-spin-button,
 .t3d-num::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+.t3d-num:hover {
+  border-bottom-color: var(--line);
+}
 .t3d-num:focus {
-  color: var(--label);
+  border-bottom-color: #fff;
   outline: none;
 }
 .t3d-num + .t3d-row-detail {
-  margin-left: -7px;
+  margin-left: -6px;
 }
 
-/* ---- botones ------------------------------------------------------------------- */
+/* ---- botones en pastilla ------------------------------------------------------------- */
 .t3d-btn {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 11px 14px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--fill-strong);
+  padding: 14px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
   color: var(--label);
-  font: inherit;
-  font-weight: 600;
+  font: 500 10.5px/1 var(--font);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: background 0.2s, filter 0.2s, transform 0.12s;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.12s;
 }
 .t3d-btn + .t3d-btn {
   margin-top: 8px;
 }
 .t3d-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  border-color: #fff;
 }
 .t3d-btn:active,
-.t3d-tile:active {
+.t3d-tile:active,
+.t3d-icon-btn:active:not(:disabled) {
   transform: scale(0.97);
 }
 .t3d-btn.is-primary,
 .t3d-btn[aria-pressed='true'] {
-  background: var(--accent);
-  color: #fff;
+  background: #fff;
+  border-color: #fff;
+  color: var(--ink);
 }
 .t3d-btn.is-primary:hover,
 .t3d-btn[aria-pressed='true']:hover {
-  filter: brightness(1.08);
+  background: rgba(255, 255, 255, 0.86);
+}
+.t3d-btn.is-round {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  padding: 0;
 }
 .t3d-btn.is-small {
   width: auto;
-  padding: 7px 14px;
-  border-radius: 999px;
+  padding: 8px 14px;
 }
 .t3d-link {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--label);
   font: inherit;
-  font-weight: 500;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line-strong);
   cursor: pointer;
 }
 
-/* ---- baldosas estilo Centro de control ---------------------------------------------- */
+/* ---- accesos (rejilla de pastillas con icono) ------------------------------------------ */
 .t3d-tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -454,19 +640,19 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 14px;
-  background: var(--fill);
+  padding: 5px 12px 5px 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
   color: var(--label);
-  font: inherit;
-  font-weight: 500;
+  font: 400 12.5px/1.2 var(--font);
+  letter-spacing: 0.02em;
   text-align: left;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, transform 0.12s;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, transform 0.12s;
 }
 .t3d-tile:hover {
-  background: var(--fill-strong);
+  border-color: #fff;
 }
 .t3d-tile-icon {
   width: 28px;
@@ -475,15 +661,16 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.12);
   transition: background 0.2s, color 0.2s;
 }
 .t3d-tile[aria-pressed='true'] {
-  background: rgba(255, 255, 255, 0.92);
-  color: #1c1c1e;
+  background: #fff;
+  border-color: #fff;
+  color: var(--ink);
 }
 .t3d-tile[aria-pressed='true'] .t3d-tile-icon {
-  background: var(--accent);
+  background: var(--ink);
   color: #fff;
 }
 
@@ -495,18 +682,18 @@
   height: 42px;
   display: grid;
   place-items: center;
-  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 50%;
-  background: rgba(30, 30, 32, 0.5);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-  backdrop-filter: blur(30px) saturate(180%);
-  color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  background: rgba(30, 34, 42, 0.5);
+  -webkit-backdrop-filter: blur(30px) saturate(160%);
+  backdrop-filter: blur(30px) saturate(160%);
+  color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
   cursor: pointer;
-  transition: opacity 0.3s, transform 0.15s;
+  transition: opacity 0.3s, transform 0.15s, background 0.2s;
 }
 .t3d-fab:hover {
-  background: rgba(58, 58, 60, 0.6);
+  background: rgba(58, 64, 76, 0.6);
 }
 .t3d-fab:active {
   transform: scale(0.94);
@@ -516,76 +703,45 @@
   pointer-events: none;
 }
 
-/* ---- resumen fijo y pestañas ---------------------------------------------------------- */
-.t3d-summary {
-  margin: 4px 14px 0;
-  background: var(--fill);
-  border-radius: 14px;
-}
-.t3d-tabs {
-  display: flex;
-  gap: 2px;
-  margin: 12px 14px 4px;
-  padding: 2px;
-  border-radius: 9px;
-  background: rgba(118, 118, 128, 0.24);
-}
-.t3d-tabs button {
-  flex: 1;
-  padding: 6px 4px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--secondary);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.25s var(--ease), color 0.2s;
-}
-.t3d-tabs button[aria-selected='true'] {
-  background: rgba(255, 255, 255, 0.22);
-  color: var(--label);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14), inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
-}
-.t3d-tabpanel {
-  animation: t3d-fade 0.25s ease;
-}
-@keyframes t3d-fade {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* ---- propuesta de compra ---------------------------------------------------------------- */
+/* ---- propuesta de compra: precio grande y botón blanco ------------------------------------ */
 .t3d-proposal {
-  margin-top: 8px;
-  padding: 12px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border: 0.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  animation: t3d-fade 0.25s ease;
-}
-.t3d-proposal-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.t3d-proposal-head > div:first-child {
-  flex: 1;
+  margin-top: 14px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  animation: t3d-fade 0.3s ease;
 }
 .t3d-proposal-title {
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 400;
 }
-.t3d-proposal-total {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+.t3d-proposal-detail {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+.t3d-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 16px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.t3d-price-label {
+  color: var(--secondary);
+}
+.t3d-price-value {
+  font-size: 30px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
 }
 .t3d-proposal-actions {
-  display: grid;
-  grid-template-columns: 1fr 1.4fr;
-  gap: 8px;
+  display: flex;
+  gap: 10px;
 }
 .t3d-proposal-actions .t3d-btn + .t3d-btn {
   margin-top: 0;
@@ -610,8 +766,8 @@
   backdrop-filter: blur(30px) saturate(180%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
   color: rgba(255, 255, 255, 0.92);
-  font: 500 13px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
-  letter-spacing: -0.01em;
+  font: 400 13px/1 'Jost', 'Futura', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: 0.02em;
   transform: translateX(-50%);
   transition: left 0.5s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.3s, transform 0.3s;
   white-space: nowrap;
@@ -688,7 +844,7 @@
   backdrop-filter: blur(30px) saturate(180%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
   color: rgba(255, 255, 255, 0.95);
-  font: 500 13px/1.2 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  font: 500 13px/1.2 'Jost', 'Futura', 'Avenir Next', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   white-space: nowrap;
   animation: t3d-toast 2s ease forwards;
 }
@@ -701,10 +857,14 @@
 
 /* ---- atajos visibles en las filas ------------------------------------------------------- */
 .t3d-kbd {
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--secondary);
-  font-size: 11px;
+  min-width: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--label);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
